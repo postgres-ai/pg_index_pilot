@@ -140,3 +140,7 @@ Add docmentation/howto about working with advanced settings and custom configura
 Add support of watching remote databases.
 Add better commentaries to code.
 
+## future plans
+ - implement reindex strategy based on bloat estimation query https://github.com/ioguix/pgsql-bloat-estimation
+ - implement reindex strategy based on bloat calculation made by pgstattuple
+
