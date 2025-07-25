@@ -80,53 +80,54 @@ Cons:
 === pg_index_watch README ===
 
 
-## Basic requirements for installation and usage:
-    • PostgreSQL version 12.0 or higher
-    • Superuser access to the database with the possibility writing cron from the current user 
-        ◦ psql access is sufficient
-        ◦ Root or sudo to PostgreSQL isn’t required
-    • Possibility of passwordless or ~/.pgpass access on behalf of superuser to all local databases
-    (i.e. you should be able to run psql -U postgres -d datname without entering the password.)
+## Requirements
+- PostgreSQL version 12.0 or higher
+- Superuser access to the database
+- Passwordless or `~/.pgpass` access for the superuser to all local databases
+- `pg_cron` extension for scheduling (optional and recommended)
 
 ## Recommendations 
-    • If server resources allow set non-zero max_parallel_maintenance_workers (exact amount depends on server parameters).
-    • To set wal_keep_segments to at least 5000, unless the wal archive is used to support streaming replication.
+- If server resources allow set non-zero `max_parallel_maintenance_workers` (exact amount depends on server parameters).
+- To set `wal_keep_segments` to at least `5000`, unless the WAL archive is used to support streaming replication.
 
 ## Installation (as PostgreSQL user)
 
-# get the code git clone
-```
-git clone https://github.com/dataegret/pg_index_watch
-cd pg_index_watch
-#create tables’ structure
-psql -1 -d postgres -f index_watch_tables.sql
-#importing the code (stored procedures)
-psql -1 -d postgres -f index_watch_functions.sql
-```
+```bash
+# Clone the repository
+git clone https://github.com/dataegret/pg_index_pilot
+cd pg_index_pilot
 
-## The initial launch
+# Create schema and tables
+psql -1 -d postgres -f index_pilot_tables.sql
 
-IMPORTANT!!! During the FIRST (and ONLY FIRST) launch ALL!! the indexes that are bigger than 10MB (default setting) will be rebuilt.  
-This process might take several hours (or even days).
-On the large databases (sized several TB) I suggest performing the FIRST launch manually. 
-After that, only bloated indexes will be processed.
-
-```
-nohup psql -d postgres -qt -c "CALL index_watch.periodic(TRUE);" >> index_watch.log 2>&1
+# Load stored procedures
+psql -1 -d postgres -f index_pilot_functions.sql
 ```
 
+## Initial launch
+
+**IMPORTANT:** During the first run, all indexes larger than index_size_threshold (default: 10MB) will be analyzed and potentially rebuilt. This process may take hours or days on large databases.
+
+For manual initial run:
+```bash
+nohup psql -d postgres -qXt -c "call index_watch.periodic(true)" >> index_watch.log 2>&1
+```
 
 ## Automated work following the installation
-Set up the cron daily, for example at midnight (from superuser of the database = normally postgres) or hourly if there is a high number of writes to a database. 
+Set up the cron daily, for example at midnight (from superuser of the database -- normally, `postgres`) or hourly if there is a high number of writes to a database. 
 
-IMPORTANT!!! It’s highly advisable to make sure that the time doesn’t coincide with pg_dump and other long maintenance tasks.
+**RECOMMENDATION:** It’s highly recommended to make sure that reindexing doesn't overlap with IO-intensive, long-running maintenance jobs like `pg_dump`.
 
-```
-00 00 * * *   psql -d postgres -AtqXc "select not pg_is_in_recovery();" | grep -qx t || exit; psql -d postgres -qt -c "CALL index_watch.periodic(TRUE);"
+Schedule via cron (adjust timing to avoid conflicts with backups and maintenance):
+
+
+```cron
+# runs reindexing only on primary
+00 00 * * *   psql -d postgres -AtqXc "select not pg_is_in_recovery()" | grep -qx t || exit; psql -d postgres -qt -c "call index_watch.periodic(true);"
 ```
 
 ## UPDATE to new versions (from a postgres user)
-```
+```bash
 cd pg_index_watch
 git pull
 #load updated codebase
