@@ -148,18 +148,18 @@ select index_watch.check_update_structure_version();
 ### View Reindexing History
 ```sql
 -- Show recent reindexing operations
-SELECT * FROM index_watch.history 
-ORDER BY created_at DESC 
-LIMIT 20;
+select * from index_watch.history 
+order by created_at desc 
+limit 20;
 ```
 
 ### Check Current Bloat Status
 ```sql
 -- Replace 'mydb' with your database name
-SELECT * 
-FROM index_watch.get_index_bloat_estimates('mydb') 
-ORDER BY estimated_bloat DESC NULLS LAST 
-LIMIT 40;
+select * 
+from index_watch.get_index_bloat_estimates('mydb') 
+order by estimated_bloat desc nulls last 
+limit 40;
 ```
 
 ## Function Reference
@@ -169,13 +169,13 @@ LIMIT 40;
 #### `index_watch.version()`
 Returns the installed pg_index_watch version.
 ```sql
-SELECT index_watch.version();
+select index_watch.version();
 ```
 
 #### `index_watch.check_update_structure_version()`
 Updates the index_watch table structure to the current version.
 ```sql
-SELECT index_watch.check_update_structure_version();
+select index_watch.check_update_structure_version();
 ```
 
 ### Configuration Management
@@ -183,27 +183,27 @@ SELECT index_watch.check_update_structure_version();
 #### `index_watch.get_setting()`
 Retrieves configuration values for specific database objects.
 ```sql
-FUNCTION index_watch.get_setting(
+function index_watch.get_setting(
     _datname text,      -- Database name
     _schemaname text,   -- Schema name
     _relname text,      -- Table name
     _indexrelname text, -- Index name
-    _key TEXT          -- Setting key
-) RETURNS TEXT
+    _key text          -- Setting key
+) returns text
 ```
 
 #### `index_watch.set_or_replace_setting()`
 Sets or updates configuration values.
 ```sql
-FUNCTION index_watch.set_or_replace_setting(
+function index_watch.set_or_replace_setting(
     _datname text,      -- Database name
     _schemaname text,   -- Schema name
     _relname text,      -- Table name
     _indexrelname text, -- Index name
-    _key TEXT,         -- Setting key
+    _key text,         -- Setting key
     _value text,       -- Setting value
     _comment text      -- Optional comment
-) RETURNS VOID
+) returns void
 ```
 
 ### Bloat Analysis
@@ -211,8 +211,8 @@ FUNCTION index_watch.set_or_replace_setting(
 #### `index_watch.get_index_bloat_estimates()`
 Returns current bloat estimates for all indexes in a database.
 ```sql
-FUNCTION index_watch.get_index_bloat_estimates(_datname name) 
-RETURNS TABLE(
+function index_watch.get_index_bloat_estimates(_datname name) 
+returns table(
     datname name, 
     schemaname name, 
     relname name, 
@@ -230,23 +230,23 @@ Forcefully populates the baseline ratio for a specific index without reindexing.
 - Restoring from backups
 - Bulk data operations
 ```sql
-FUNCTION index_watch.do_force_populate_index_stats(
+function index_watch.do_force_populate_index_stats(
     _datname name, 
     _schemaname name, 
     _relname name, 
     _indexrelname name
-) RETURNS VOID
+) returns void
 ```
 
 #### `index_watch.do_reindex()`
 Manually triggers reindexing for specific objects.
 ```sql
-PROCEDURE index_watch.do_reindex(
+procedure index_watch.do_reindex(
     _datname name, 
     _schemaname name, 
     _relname name, 
     _indexrelname name, 
-    _force BOOLEAN DEFAULT FALSE  -- Force reindex regardless of bloat
+    _force boolean default false  -- Force reindex regardless of bloat
 )
 ```
 
@@ -255,8 +255,8 @@ PROCEDURE index_watch.do_reindex(
 #### `index_watch.periodic()`
 Main procedure for automated bloat detection and reindexing across all databases.
 ```sql
-PROCEDURE index_watch.periodic(
-    real_run BOOLEAN DEFAULT FALSE,  -- Execute actual reindexing
-    force BOOLEAN DEFAULT FALSE      -- Force all eligible indexes
+procedure index_watch.periodic(
+    real_run boolean default false,  -- Execute actual reindexing
+    force boolean default false      -- Force all eligible indexes
 )
 ```
