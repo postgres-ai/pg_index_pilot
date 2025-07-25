@@ -8,15 +8,16 @@ This project is in its very early stage. We start with most boring yet extremely
 
 The Roadmap covers three big areas:
 
-1. [ ] **"AR":** Automated reindexing
+1. [ ] **"AR":** Automated Reindexing
     1. [x] Maxim Boguk's bloat estimation formula – works with *any* type of index, not only btree
         1. [x] original implementation (`pg_index_watch`) – requires initial full reindex
         2. [ ] superuser-less mode
-        3. [ ] API for stats obtained on a clone (to avoid full reindex on prod primary)
+        2. [ ] flexible connection management for dblink
+        4. [ ] API for stats obtained on a clone (to avoid full reindex on prod primary)
     2. [ ] Traditional bloat estimatation (ioguix; btree only)
     3. [ ] Exact bloat analysis (pgstattuple; analysis on clones)
-    4. [ ] Tested on managed services
-        - [ ] RDS and Aurora
+    4. [x] Tested on managed services
+        - [ ] RDS and Aurora (see [RDS Setup](#rds-setup) below)
         - [ ] CloudSQL
         - [ ] Supabase
         - [ ] Crunchy Bridge
@@ -24,12 +25,12 @@ The Roadmap covers three big areas:
     5. [ ] Integration with postgres_ai monitoring
     6. [ ] Schedule recommendations
     7. [ ] Parallelization and throttling (adaptive)
-2. [ ] **"AIR":** Automated index removal
+2. [ ] **"AIR":** Automated Index Removal
     1. [ ] Unused indexes
     2. [ ] Redundant indexes
     3. [ ] Invalid indexes (or, per configuration, rebuilding them)
     4. [ ] Suboptimal / rarely used indexes cleanup/reorg
-3. [ ] **"AIC&O":** Automated index creation and optimization
+3. [ ] **"AIC&O":** Automated Index Creation & Optimization
     1. [ ] Index recommendations (including multi-column, expression, partial, hybrid, and covering indexes)
     2. [ ] Index optimization according to configured goals (latency, size, WAL, write/HOT overhead, read overhead)
     3. [ ] Experimentation (hypothetical with HypoPG, real with DBLab)
@@ -257,6 +258,101 @@ Main procedure for automated bloat detection and reindexing across all databases
 ```sql
 procedure index_watch.periodic(
     real_run boolean default false,  -- Execute actual reindexing
-    force boolean default false      -- Force all eligible indexes
+    force boolean default false,     -- Force all eligible indexes
+    single_db boolean default null   -- Force single database mode (for RDS)
 )
+```
+
+## RDS Setup
+
+pg_index_pilot now supports AWS RDS with some limitations due to RDS's managed environment. RDS mode automatically handles the differences in permissions and access.
+
+### Prerequisites for RDS
+
+1. RDS PostgreSQL 12.0 or higher
+2. `dblink` extension installed
+3. `pg_cron` extension (optional, for scheduling)
+4. User with index ownership or appropriate permissions
+
+### Installation on RDS
+
+```bash
+# 1. Create the extension structures
+psql -d your_database -f index_watch_tables.sql
+psql -d your_database -f index_watch_functions.sql
+psql -d your_database -f index_watch_rds.sql
+
+# 2. Configure for RDS mode
+psql -d your_database -c "SELECT index_watch.install_rds_mode();"
+```
+
+### Single Database Operation (Recommended for RDS)
+
+For most RDS use cases, monitoring a single database is sufficient:
+
+```sql
+-- Manual run for current database only
+CALL index_watch.periodic(true, false, true);
+
+-- Schedule with pg_cron (if available)
+SELECT index_watch.setup_rds_cron('0 2 * * *', true);
+```
+
+### Multi-Database Operation on RDS
+
+If you need to monitor multiple databases on the same RDS instance:
+
+```sql
+-- Configure additional databases
+SELECT index_watch.setup_rds_dblink(
+    'database2',
+    'your-instance.region.rds.amazonaws.com',
+    5432,
+    'your_username',
+    'your_password'
+);
+
+-- Check status
+SELECT * FROM index_watch.monitored_databases;
+
+-- Run across all configured databases
+CALL index_watch.periodic(true, false, false);
+```
+
+### RDS-Specific Functions
+
+#### Check RDS Status
+```sql
+SELECT * FROM index_watch.rds_status();
+```
+
+#### Verify Permissions
+```sql
+SELECT * FROM index_watch.check_rds_permissions();
+```
+
+### RDS Limitations and Differences
+
+1. **No Cross-Database Discovery**: You must explicitly configure databases to monitor
+2. **No Toast Table Processing**: Limited access to pg_toast schema
+3. **Single Database Mode Default**: Recommended mode for RDS
+4. **Connection Management**: Uses explicit connection strings instead of local connections
+5. **No Superuser Access**: Works within RDS permission model
+
+### Monitoring on RDS
+
+```sql
+-- View recent reindexing operations
+SELECT * FROM index_watch.history 
+ORDER BY ts DESC 
+LIMIT 20;
+
+-- Check bloat estimates for current database
+SELECT * FROM index_watch.get_index_bloat_estimates(current_database()) 
+ORDER BY estimated_bloat DESC NULLS LAST 
+LIMIT 20;
+
+-- Check monitored databases status (multi-db mode)
+SELECT datname, enabled, last_check, last_error 
+FROM index_watch.monitored_databases;
 ```
