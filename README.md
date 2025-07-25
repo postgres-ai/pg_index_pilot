@@ -32,8 +32,8 @@ ROADMAP: Areas of index management (checkboxes show what's already implemented):
 ## Automated reindexing
 
 The framework of reindexing is implemented entirely inside Postgres, using:
-- PL/pgSQL functions and stored procedures with transaction control
-- [dblink](https://www.postgresql.org/docs/current/contrib-dblink-function.html) to execute `REINDEX CONCURRENTLY` (since it cannot be inside a transaction block)
+- PL/pgSQL functions and stored procedures with transaction control (PG11+)
+- [dblink](https://www.postgresql.org/docs/current/contrib-dblink-function.html) to execute `REINDEX CONCURRENTLY` (PG12+) – because it cannot be inside a transaction block)
 - widely available [pg_cron](https://github.com/citusdata/pg_cron) for scheduling
 
 ## Supported Postgres versions
