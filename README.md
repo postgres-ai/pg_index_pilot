@@ -29,6 +29,22 @@ ROADMAP: Areas of index management (checkboxes show what's already implemented):
     2. [ ] Index optimization according to configured goals (latency / WAL / size)
     3. [ ] Experimentation (hypothetical with HypoPG, real with DBLab)
 
+## Automated reindexing
+
+### Maxim Boguk's formula
+
+Traditional index bloat estimation ([ioguix](https://github.com//pgsql-bloat-estimation/tree/master/btree)) is widely used but has certain limitations:
+- only btree indexes are supported (GIN, GiST, hash, HNSW and others are not supported at all)
+- it can be quite off in certain cases
+- [the non-superuser version](https://github.com/ioguix/pgsql-bloat-estimation/blob/master/btree/btree_bloat.sql) inspects "only index on tables you are granted to read" (requires additional permissions), and in this case it is slow (~1000x slower than [the superuser version](https://github.com/ioguix/pgsql-bloat-estimation/blob/master/btree/btree_bloat-superuser.sql))
+- due to its speed, can be challenging to use in database with huge number of indexes.
+
+An alternative approach was deveoped by Maxim Boguk. It relies on the ratio between index size and `pg_class.reltuples` – Boguk's formula:
+
+    `bloat indicator = index size / pg_class.reltuples`
+
+The pg_index_watch utilizes the ratio between index size and pg_class.reltuples (which is kept up-to-date with help of autovacuum/autoanalyze) to determine the extent of index bloat relative to the ideal situation of the newly built index.
+It also allows rebuilding bloated indexes of any type without dependency on pgstattuple for estimating index bloat.
 
 ---
 
