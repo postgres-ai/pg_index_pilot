@@ -8,7 +8,7 @@ This project is in its very early stage. We start with most boring yet extremely
 
 The Roadmap covers three big areas:
 
-1. [ ] **"AR":** Automated reindexing
+1. [ ] **"AR":** Automated Reindexing
     1. [x] Maxim Boguk's bloat estimation formula – works with *any* type of index, not only btree
         1. [x] original implementation (`pg_index_watch`) – requires initial full reindex
         2. [ ] superuser-less mode
@@ -17,7 +17,7 @@ The Roadmap covers three big areas:
     2. [ ] Traditional bloat estimatation (ioguix; btree only)
     3. [ ] Exact bloat analysis (pgstattuple; analysis on clones)
     4. [x] Tested on managed services
-        - [x] RDS and Aurora (see [RDS Setup](#rds-setup) below)
+        - [ ] RDS and Aurora (see [RDS Setup](#rds-setup) below)
         - [ ] CloudSQL
         - [ ] Supabase
         - [ ] Crunchy Bridge
@@ -25,12 +25,12 @@ The Roadmap covers three big areas:
     5. [ ] Integration with postgres_ai monitoring
     6. [ ] Schedule recommendations
     7. [ ] Parallelization and throttling (adaptive)
-2. [ ] **"AIR":** Automated index removal
+2. [ ] **"AIR":** Automated Index Removal
     1. [ ] Unused indexes
     2. [ ] Redundant indexes
     3. [ ] Invalid indexes (or, per configuration, rebuilding them)
     4. [ ] Suboptimal / rarely used indexes cleanup/reorg
-3. [ ] **"AIC&O":** Automated index creation and optimization
+3. [ ] **"AIC&O":** Automated Index Creation & Optimization
     1. [ ] Index recommendations (including multi-column, expression, partial, hybrid, and covering indexes)
     2. [ ] Index optimization according to configured goals (latency, size, WAL, write/HOT overhead, read overhead)
     3. [ ] Experimentation (hypothetical with HypoPG, real with DBLab)
