@@ -23,17 +23,28 @@ The Roadmap covers three big areas:
         - [ ] Crunchy Bridge
         - [ ] Azure
     5. [ ] Integration with postgres_ai monitoring
-    6. [ ] Schedule recommendations
-    7. [ ] Parallelization and throttling (adaptive)
+    6. [ ] Resource-aware scheduling, predictive maintenance windows (when will load be lowest?)
+    7. [ ] Coordination with other ops (backups, vacuums, upgrades)
+    8. [ ] Parallelization and throttling (adaptive)
+    9. [ ] Predictive bloat modeling 
+    10. [ ] Learning & Feedback Loops: learning from past actions, A/B testing and "what-if" simulation (DBLab)
+    11. [ ] Impact estimation before scheduling
+    12. [ ] RCA of fast degraded index health (why it gets bloated fast?) and mitigation (tune autovacuum, avoid xmin horizon getting stuck)
+    13. [ ] Self-adjusting thresholds
 2. [ ] **"AIR":** Automated Index Removal
     1. [ ] Unused indexes
     2. [ ] Redundant indexes
     3. [ ] Invalid indexes (or, per configuration, rebuilding them)
-    4. [ ] Suboptimal / rarely used indexes cleanup/reorg
+    4. [ ] Advanced scoring; suboptimal / rarely used indexes cleanup; self-adjusting thresholds
+    5. [ ] Forecasting of index usage; seasonal pattern recognition
+    6. [ ] Impact estimation before removal; "what-if" simulation (DBLab)
 3. [ ] **"AIC&O":** Automated Index Creation & Optimization
     1. [ ] Index recommendations (including multi-column, expression, partial, hybrid, and covering indexes)
     2. [ ] Index optimization according to configured goals (latency, size, WAL, write/HOT overhead, read overhead)
     3. [ ] Experimentation (hypothetical with HypoPG, real with DBLab)
+    4. [ ] Query pattern classification
+    5. [ ] dvanced scoring; cost/benefit analysis
+    6. [ ] Impact estimation before operations; "what-if" simulation (DBLab)
 
 ## Automated reindexing
 
