@@ -106,95 +106,157 @@ psql -1 -d postgres -f index_pilot_functions.sql
 
 ## Initial launch
 
-**IMPORTANT:** During the first run, all indexes larger than index_size_threshold (default: 10MB) will be analyzed and potentially rebuilt. This process may take hours or days on large databases.
+**⚠️ IMPORTANT:** During the first run, all indexes larger than index_size_threshold (default: 10MB) will be analyzed and potentially rebuilt. This process may take hours or days on large databases.
 
 For manual initial run:
 ```bash
 nohup psql -d postgres -qXt -c "call index_watch.periodic(true)" >> index_watch.log 2>&1
 ```
 
-## Automated work following the installation
-Set up the cron daily, for example at midnight (from superuser of the database -- normally, `postgres`) or hourly if there is a high number of writes to a database. 
+## Scheduling automated maintenance
 
-**RECOMMENDATION:** It’s highly recommended to make sure that reindexing doesn't overlap with IO-intensive, long-running maintenance jobs like `pg_dump`.
-
-Schedule via cron (adjust timing to avoid conflicts with backups and maintenance):
-
-
+Configure automated reindexing through cron. The example below runs daily at midnight:
 ```cron
-# runs reindexing only on primary
+# Runs reindexing only on primary
 00 00 * * *   psql -d postgres -AtqXc "select not pg_is_in_recovery()" | grep -qx t || exit; psql -d postgres -qt -c "call index_watch.periodic(true);"
 ```
 
-## UPDATE to new versions (from a postgres user)
+**💡 Best Practices:**
+- Schedule during low-traffic periods
+- Avoid overlapping with backup or other IO-intensive operations
+- Consider hourly runs for high-write workloads
+- Monitor resource usage during initial runs (first of all, both disk IO and CPU usage)
+
+## Updating pg_index_pilot
+
+To update to the latest version:
 ```bash
 cd pg_index_pilot
 git pull
-#load updated codebase
-psql -1 -d postgres -f index_watch_functions.sql
-index_watch table structure update will be performed AUTOMATICALLY (if needed) with the next index_watch.periodic command.
+
+# Reload the updated functions
+psql -1 -d postgres -f index_pilot_functions.sql
 ```
 
-However, you can manually update tables structure to the current version (normally, this is not required):
-
-```
-psql -1 -d postgres -c "SELECT index_watch.check_update_structure_version()"
-```
-
-## Viewing reindexing history (it is renewed during the initial launch and with launch from crons): 
-```
-psql -1 -d postgres -c "SELECT * FROM index_watch.history LIMIT 20"
+The table structure updates automatically during the next index_watch.periodic() run. To manually update the structure (normally, this is not required):
+```sql
+select index_watch.check_update_structure_version();
 ```
 
-## review of current bloat status in  
-specific database DB_NAME:
-Assumes that cron index_watch.periodic WORKS, otherwise data will not be updated.
+## Monitoring and Analysis
 
+### View Reindexing History
+```sql
+-- Show recent reindexing operations
+SELECT * FROM index_watch.history 
+ORDER BY created_at DESC 
+LIMIT 20;
 ```
-psql -1 -d postgres -c "select * from index_watch.get_index_bloat_estimates('DB_NAME') order by estimated_bloat desc nulls last limit 40;"
+
+### Check Current Bloat Status
+```sql
+-- Replace 'mydb' with your database name
+SELECT * 
+FROM index_watch.get_index_bloat_estimates('mydb') 
+ORDER BY estimated_bloat DESC NULLS LAST 
+LIMIT 40;
 ```
 
-## list of user callable functions and arguments
+## Function Reference
 
-### index_watch.version()
-FUNCTION index_watch.version() RETURNS TEXT
-returns version installed
+### Core Functions
 
-### index_watch.check_update_structure_version()
-FUNCTION index_watch.check_update_structure_version() RETURNS VOID
-update index watch table structure to the current version
+#### `index_watch.version()`
+Returns the installed pg_index_watch version.
+```sql
+SELECT index_watch.version();
+```
 
-### index_watch.get_setting
-FUNCTION index_watch.get_setting(_datname text, _schemaname text, _relname text, _indexrelname text, _key TEXT) RETURNS TEXT
-returns configuration value for given database, schema, table, index and setting name 
+#### `index_watch.check_update_structure_version()`
+Updates the index_watch table structure to the current version.
+```sql
+SELECT index_watch.check_update_structure_version();
+```
 
-### index_watch.set_or_replace_setting
-FUNCTION index_watch.set_or_replace_setting(_datname text, _schemaname text, _relname text, _indexrelname text, _key TEXT, _value text, _comment text) RETURNS VOID
-set or replace setting value for given database, schema, table, index and setting name
+### Configuration Management
 
-### index_watch.get_index_bloat_estimates
-FUNCTION index_watch.get_index_bloat_estimates(_datname name) RETURNS TABLE(datname name, schemaname name, relname name, indexrelname name, indexsize bigint, estimated_bloat real) 
-returns table of current estimated index bloat for given database
+#### `index_watch.get_setting()`
+Retrieves configuration values for specific database objects.
+```sql
+FUNCTION index_watch.get_setting(
+    _datname text,      -- Database name
+    _schemaname text,   -- Schema name
+    _relname text,      -- Table name
+    _indexrelname text, -- Index name
+    _key TEXT          -- Setting key
+) RETURNS TEXT
+```
 
-### index_watch.do_force_populate_index_stats
-FUNCTION index_watch.do_force_populate_index_stats(_datname name, _schemaname name, _relname name, _indexrelname name) RETURNS VOID
-forced populate of best index ratio for given database, schema, table, index without mandatory reindexing (useful if new huge index just created and definitely don't have any bloat or after pg_restore and similar cases
+#### `index_watch.set_or_replace_setting()`
+Sets or updates configuration values.
+```sql
+FUNCTION index_watch.set_or_replace_setting(
+    _datname text,      -- Database name
+    _schemaname text,   -- Schema name
+    _relname text,      -- Table name
+    _indexrelname text, -- Index name
+    _key TEXT,         -- Setting key
+    _value text,       -- Setting value
+    _comment text      -- Optional comment
+) RETURNS VOID
+```
 
-### index_watch.do_reindex
-PROCEDURE index_watch.do_reindex(_datname name, _schemaname name, _relname name, _indexrelname name, _force BOOLEAN DEFAULT FALSE) 
-perform reindex of bloated indexes in given database, schema, table, index (or every suitable indexes with _force=>true)
+### Bloat Analysis
 
-### index_watch.periodic
-PROCEDURE index_watch.periodic(real_run BOOLEAN DEFAULT FALSE, force BOOLEAN DEFAULT FALSE) AS
-perform bloat based reindex of every accessible database in cluster
+#### `index_watch.get_index_bloat_estimates()`
+Returns current bloat estimates for all indexes in a database.
+```sql
+FUNCTION index_watch.get_index_bloat_estimates(_datname name) 
+RETURNS TABLE(
+    datname name, 
+    schemaname name, 
+    relname name, 
+    indexrelname name, 
+    indexsize bigint, 
+    estimated_bloat real
+)
+```
 
+### Manual Operations
 
-## todo
-Add docmentation/howto about working with advanced settings and custom configuration of utility.
-Add support of watching remote databases.
-Add better commentaries to code.
+#### `index_watch.do_force_populate_index_stats()`
+Forcefully populates the baseline ratio for a specific index without reindexing. Useful after:
+- Creating new indexes
+- Restoring from backups
+- Bulk data operations
+```sql
+FUNCTION index_watch.do_force_populate_index_stats(
+    _datname name, 
+    _schemaname name, 
+    _relname name, 
+    _indexrelname name
+) RETURNS VOID
+```
 
-## future plans
- - implement reindex strategy based on bloat estimation query https://github.com/ioguix/pgsql-bloat-estimation
- - implement reindex strategy based on bloat calculation made by pgstattuple
+#### `index_watch.do_reindex()`
+Manually triggers reindexing for specific objects.
+```sql
+PROCEDURE index_watch.do_reindex(
+    _datname name, 
+    _schemaname name, 
+    _relname name, 
+    _indexrelname name, 
+    _force BOOLEAN DEFAULT FALSE  -- Force reindex regardless of bloat
+)
+```
 
+### Automated Maintenance
+
+#### `index_watch.periodic()`
+Main procedure for automated bloat detection and reindexing across all databases.
+```sql
+PROCEDURE index_watch.periodic(
+    real_run BOOLEAN DEFAULT FALSE,  -- Execute actual reindexing
+    force BOOLEAN DEFAULT FALSE      -- Force all eligible indexes
+)
+```
