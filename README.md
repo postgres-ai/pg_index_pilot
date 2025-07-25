@@ -10,7 +10,7 @@ The Roadmap covers three big areas:
 
 1. [ ] **"AR":** Automated reindexing
     1. [x] Maxim Boguk's bloat estimation formula – works with *any* type of index, not only btree
-        1. [x] original implementation (pg_index_watch) – requires initial full reindex
+        1. [x] original implementation (`pg_index_watch`) – requires initial full reindex
         2. [ ] superuser-less mode
         3. [ ] API for stats obtained on a clone (to avoid full reindex on prod primary)
     2. [ ] Traditional bloat estimatation (ioguix; btree only)
@@ -77,7 +77,7 @@ Cons:
 
 ---
 
-=== pg_index_watch README ===
+=== pg_index_watch original README (polished) ===
 
 
 ## Requirements
@@ -128,7 +128,7 @@ Schedule via cron (adjust timing to avoid conflicts with backups and maintenance
 
 ## UPDATE to new versions (from a postgres user)
 ```bash
-cd pg_index_watch
+cd pg_index_pilot
 git pull
 #load updated codebase
 psql -1 -d postgres -f index_watch_functions.sql
@@ -158,7 +158,7 @@ psql -1 -d postgres -c "select * from index_watch.get_index_bloat_estimates('DB_
 
 ### index_watch.version()
 FUNCTION index_watch.version() RETURNS TEXT
-returns installed pg_index_watch version
+returns version installed
 
 ### index_watch.check_update_structure_version()
 FUNCTION index_watch.check_update_structure_version() RETURNS VOID
