@@ -25,8 +25,8 @@ ROADMAP: Areas of index management (checkboxes show what's already implemented):
     3. [ ] Invalid indexes (or, per configuration, rebuilding them)
     4. [ ] Suboptimal / rarely used indexes cleanup/reorg
 3. [ ] Automated index management
-    1. [ ] Index recommendations (missing, )
-    2. [ ] Index optimization according to configured goals (latency / WAL / size)
+    1. [ ] Index recommendations (including multi-column, expression, partial, hybrid, and covering indexes)
+    2. [ ] Index optimization according to configured goals (latency, size, WAL, write/HOT overhead, read overhead)
     3. [ ] Experimentation (hypothetical with HypoPG, real with DBLab)
 
 ## Automated reindexing
@@ -72,7 +72,7 @@ Cons:
 
 ---
 
-== pg_index_watch original help ==
+=== pg_index_watch README ===
 
 
 ## Basic requirements for installation and usage:
@@ -107,7 +107,7 @@ On the large databases (sized several TB) I suggest performing the FIRST launch 
 After that, only bloated indexes will be processed.
 
 ```
-nohup psql -d postgres -qt -c "CALL index_watch.periodic(TRUE);" >> index_watch.log
+nohup psql -d postgres -qt -c "CALL index_watch.periodic(TRUE);" >> index_watch.log 2>&1
 ```
 
 
