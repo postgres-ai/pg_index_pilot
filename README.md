@@ -1,9 +1,14 @@
 # pg_index_pilot – autonomous index lifecycle management for Postgres
 
-The purpose of pg_index_pilot is to provide all tools needed to manage indexes in Postgres in most automated fashion.
+The purpose of `pg_index_pilot` is to provide all tools needed to manage indexes in Postgres in most automated fashion.
 
-ROADMAP: Areas of index management (checkboxes show what's already implemented):
-1. [ ] Automated reindexing
+This project is in its very early stage. We start with most boring yet extremely important task task: automatic reindexing ("AR") to mitigate index bloat, supporting any types of indexes, and then expand to other areas of index health. And then expand to two other big areas – automated index removal ("AIR") and, finally, automated index creation and optimization ("AIC&O").
+
+## ROADMAP
+
+The Roadmap covers three big areas:
+
+1. [ ] **"AR":** Automated reindexing
     1. [x] Maxim Boguk's bloat estimation formula – works with *any* type of index, not only btree
         1. [x] original implementation (pg_index_watch) – requires initial full reindex
         2. [ ] superuser-less mode
@@ -19,12 +24,12 @@ ROADMAP: Areas of index management (checkboxes show what's already implemented):
     5. [ ] Integration with postgres_ai monitoring
     6. [ ] Schedule recommendations
     7. [ ] Parallelization and throttling (adaptive)
-2. [ ] Index cleanup
+2. [ ] **"AIR":** Automated index removal
     1. [ ] Unused indexes
     2. [ ] Redundant indexes
     3. [ ] Invalid indexes (or, per configuration, rebuilding them)
     4. [ ] Suboptimal / rarely used indexes cleanup/reorg
-3. [ ] Automated index management
+3. [ ] **"AIC&O":** Automated index creation and optimization
     1. [ ] Index recommendations (including multi-column, expression, partial, hybrid, and covering indexes)
     2. [ ] Index optimization according to configured goals (latency, size, WAL, write/HOT overhead, read overhead)
     3. [ ] Experimentation (hypothetical with HypoPG, real with DBLab)
