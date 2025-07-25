@@ -1,3 +1,39 @@
+# pg_index_pilot – autonomous index lifecycle management for Postgres
+
+The purpose of pg_index_pilot is to provide all tools needed to manage indexes in Postgres in most automated fashion.
+
+ROADMAP: Areas of index management (checkboxes show what's already implemented):
+1. [ ] Automated reindexing
+    1. [x] Maxim Boguk's bloat estimation formula – works with *any* type of index, not only btree
+        1. [x] original implementation (pg_index_watch) – requires initial full reindex
+        2. [ ] superuser-less mode
+        3. [ ] API for stats obtained on a clone (to avoid full reindex on prod primary)
+    2. [ ] Traditional bloat estimatation (ioguix; btree only)
+    3. [ ] Exact bloat analysis (pgstattuple; analysis on clones)
+    4. [ ] Tested on managed services
+        - [ ] RDS and Aurora
+        - [ ] CloudSQL
+        - [ ] Supabase
+        - [ ] Crunchy Bridge
+        - [ ] Azure
+    5. [ ] Integration with postgres_ai monitoring
+    6. [ ] Schedule recommendations
+    7. [ ] Parallelization and throttling (adaptive)
+2. [ ] Index cleanup
+    1. [ ] Unused indexes
+    2. [ ] Redundant indexes
+    3. [ ] Invalid indexes (or, per configuration, rebuilding them)
+    4. [ ] Suboptimal / rarely used indexes cleanup/reorg
+3. [ ] Automated index management
+    1. [ ] Index recommendations (missing, )
+    2. [ ] Index optimization according to configured goals (latency / WAL / size)
+    3. [ ] Experimentation (hypothetical with HypoPG, real with DBLab)
+
+
+---
+
+pg_index_watch
+
 Utility for automatical rebuild of bloated indexes (a-la smart autovacuum to deal with index bloat) in PostgreSQL.
 
 ## Program purpose
