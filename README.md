@@ -31,6 +31,15 @@ ROADMAP: Areas of index management (checkboxes show what's already implemented):
 
 ## Automated reindexing
 
+The framework of reindexing is implemented entirely inside Postgres, using:
+- PL/pgSQL functions and stored procedures with transaction control
+- [dblink](https://www.postgresql.org/docs/current/contrib-dblink-function.html) to execute `REINDEX CONCURRENTLY` (since it cannot be inside a transaction block)
+- widely available [pg_cron](https://github.com/citusdata/pg_cron) for scheduling
+
+## Supported Postgres versions
+
+PG13+ – all current Postgres versions are supported.
+
 ### Maxim Boguk's formula
 
 Traditional index bloat estimation ([ioguix](https://github.com//pgsql-bloat-estimation/tree/master/btree)) is widely used but has certain limitations:
@@ -40,11 +49,25 @@ Traditional index bloat estimation ([ioguix](https://github.com//pgsql-bloat-est
 - due to its speed, can be challenging to use in database with huge number of indexes.
 
 An alternative approach was deveoped by Maxim Boguk. It relies on the ratio between index size and `pg_class.reltuples` – Boguk's formula:
+```
+bloat indicator = index size / pg_class.reltuples
+```
 
-    `bloat indicator = index size / pg_class.reltuples`
+This method is extremely lightweight:
+- Index size is always easily available via `pg_indexes_size(indexrelid)`
+- `pg_class.reltuples` is also immedialy available and maintained up-to-date by autovacuum/autoanalyze
 
-The pg_index_watch utilizes the ratio between index size and pg_class.reltuples (which is kept up-to-date with help of autovacuum/autoanalyze) to determine the extent of index bloat relative to the ideal situation of the newly built index.
-It also allows rebuilding bloated indexes of any type without dependency on pgstattuple for estimating index bloat.
+Boguk's bloat indicator is not measured in bytes or per cents. It is to be used in relative scenario: first, we measure the "ideal" value – the value of freshly built index. And then, we observe how the value changes over time – if it significantly bigger than the "ideal" one, it is time to reindex.
+
+This defines pros and cons of this method.
+
+Pros:
+- any type of index is supported
+- very lightweight analysis
+
+Cons:
+- initial rebuild is required (TODO: implement import of baseline values from a fully reindexed clone)
+- method accuracy might be affected by a "size drift" – in case of significant change of avg. size of indexed values
 
 ---
 
