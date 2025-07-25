@@ -2,7 +2,7 @@
 
 The purpose of `pg_index_pilot` is to provide all tools needed to manage indexes in Postgres in most automated fashion.
 
-This project is in its very early stage. We start with most boring yet extremely important task task: automatic reindexing ("AR") to mitigate index bloat, supporting any types of indexes, and then expand to other areas of index health. And then expand to two other big areas – automated index removal ("AIR") and, finally, automated index creation and optimization ("AIC&O").
+This project is in its very early stage. We start with most boring yet extremely important task: automatic reindexing ("AR") to mitigate index bloat, supporting any types of indexes, and then expand to other areas of index health. And then expand to two other big areas – automated index removal ("AIR") and, finally, automated index creation and optimization ("AIC&O").
 
 ## ROADMAP
 
@@ -11,8 +11,8 @@ The Roadmap covers three big areas:
 1. [ ] **"AR":** Automated Reindexing
     1. [x] Maxim Boguk's bloat estimation formula – works with *any* type of index, not only btree
         1. [x] original implementation (`pg_index_watch`) – requires initial full reindex
-        2. [ ] superuser-less mode
-        2. [ ] flexible connection management for dblink
+        2. [x] non-superuser mode for cloud databases (AWS RDS, Google Cloud SQL, Azure)
+        3. [ ] flexible connection management for dblink
         4. [ ] API for stats obtained on a clone (to avoid full reindex on prod primary)
     2. [ ] Traditional bloat estimatation (ioguix; btree only)
     3. [ ] Exact bloat analysis (pgstattuple; analysis on clones)
@@ -54,7 +54,7 @@ Traditional index bloat estimation ([ioguix](https://github.com//pgsql-bloat-est
 - [the non-superuser version](https://github.com/ioguix/pgsql-bloat-estimation/blob/master/btree/btree_bloat.sql) inspects "only index on tables you are granted to read" (requires additional permissions), and in this case it is slow (~1000x slower than [the superuser version](https://github.com/ioguix/pgsql-bloat-estimation/blob/master/btree/btree_bloat-superuser.sql))
 - due to its speed, can be challenging to use in database with huge number of indexes.
 
-An alternative approach was deveoped by Maxim Boguk. It relies on the ratio between index size and `pg_class.reltuples` – Boguk's formula:
+An alternative approach was developed by Maxim Boguk. It relies on the ratio between index size and `pg_class.reltuples` – Boguk's formula:
 ```
 bloat indicator = index size / pg_class.reltuples
 ```
@@ -82,16 +82,31 @@ Cons:
 
 
 ## Requirements
+
+pg_index_pilot supports two operation modes:
+
+### Superuser Mode (Traditional)
 - PostgreSQL version 12.0 or higher
 - Superuser access to the database
 - Passwordless or `~/.pgpass` access for the superuser to all local databases
 - `pg_cron` extension for scheduling (optional and recommended)
+- Best for self-hosted PostgreSQL installations
+
+### Non-Superuser Mode (Cloud-Compatible)
+- PostgreSQL version 12.0 or higher
+- Database owner or appropriate permissions
+- `dblink` extension installed
+- Works with AWS RDS, Google Cloud SQL, Azure Database for PostgreSQL
+- Automatically detected when running without superuser privileges
+- Only processes current database (not entire cluster)
 
 ## Recommendations 
 - If server resources allow set non-zero `max_parallel_maintenance_workers` (exact amount depends on server parameters).
 - To set `wal_keep_segments` to at least `5000`, unless the WAL archive is used to support streaming replication.
 
-## Installation (as PostgreSQL user)
+## Installation
+
+### Standard Installation (Superuser)
 
 ```bash
 # Clone the repository
@@ -99,10 +114,29 @@ git clone https://github.com/dataegret/pg_index_pilot
 cd pg_index_pilot
 
 # Create schema and tables
-psql -1 -d postgres -f index_pilot_tables.sql
+psql -1 -d postgres -f index_watch_tables.sql
 
 # Load stored procedures
-psql -1 -d postgres -f index_pilot_functions.sql
+psql -1 -d postgres -f index_watch_functions.sql
+```
+
+### Cloud Database Installation (Non-Superuser)
+
+```bash
+# Clone the repository
+git clone https://github.com/dataegret/pg_index_pilot
+cd pg_index_pilot
+
+# Connect to your cloud database
+export PGSSLMODE=require  # For SSL connections
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database
+
+# Install the extension
+\i index_watch_tables.sql
+\i index_watch_functions.sql
+
+# Verify permissions (non-superuser mode)
+select * from index_watch.check_permissions();
 ```
 
 ## Initial launch
@@ -110,16 +144,31 @@ psql -1 -d postgres -f index_pilot_functions.sql
 **⚠️ IMPORTANT:** During the first run, all indexes larger than index_size_threshold (default: 10MB) will be analyzed and potentially rebuilt. This process may take hours or days on large databases.
 
 For manual initial run:
+
+**Superuser mode:**
 ```bash
 nohup psql -d postgres -qXt -c "call index_watch.periodic(true)" >> index_watch.log 2>&1
+```
+
+**Non-superuser mode (current database only):**
+```bash
+nohup psql -d your_database -qXt -c "call index_watch.periodic(true)" >> index_watch.log 2>&1
 ```
 
 ## Scheduling automated maintenance
 
 Configure automated reindexing through cron. The example below runs daily at midnight:
+
+**Superuser mode:**
 ```cron
-# Runs reindexing only on primary
+# Runs reindexing only on primary (all databases)
 00 00 * * *   psql -d postgres -AtqXc "select not pg_is_in_recovery()" | grep -qx t || exit; psql -d postgres -qt -c "call index_watch.periodic(true);"
+```
+
+**Non-superuser mode:**
+```cron
+# Runs reindexing only on primary (current database)
+00 00 * * *   psql -d your_database -AtqXc "select not pg_is_in_recovery()" | grep -qx t || exit; psql -d your_database -qt -c "call index_watch.periodic(true);"
 ```
 
 **💡 Best Practices:**
@@ -254,7 +303,9 @@ procedure index_watch.do_reindex(
 ### Automated Maintenance
 
 #### `index_watch.periodic()`
-Main procedure for automated bloat detection and reindexing across all databases.
+Main procedure for automated bloat detection and reindexing.
+- In superuser mode: processes all databases in the cluster
+- In non-superuser mode: processes current database only
 ```sql
 procedure index_watch.periodic(
     real_run boolean default false,  -- Execute actual reindexing
@@ -262,6 +313,29 @@ procedure index_watch.periodic(
     single_db boolean default null   -- Force single database mode (for RDS)
 )
 ```
+
+### Non-Superuser Mode Functions
+
+#### `index_watch.check_permissions()`
+Verifies permissions for non-superuser mode operation (v1.04+).
+```sql
+function index_watch.check_permissions() 
+returns table(
+    permission text, 
+    status boolean
+)
+```
+
+## Mode Comparison
+
+| Feature | Superuser Mode | Non-Superuser Mode |
+|---------|----------------|-------------------|
+| Database Coverage | All databases in cluster | Current database only |
+| Required Privileges | PostgreSQL superuser | Database owner or appropriate permissions |
+| Cloud Service Support | Limited | Full support (RDS, Cloud SQL, Azure) |
+| dblink Requirement | Built-in connectivity | Required for loopback connection |
+| Password Configuration | ~/.pgpass for all DBs | ~/.pgpass or connection string |
+| Use Case | Self-hosted PostgreSQL | Cloud databases, restricted environments |
 
 ## RDS Setup
 

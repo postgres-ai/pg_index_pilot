@@ -34,7 +34,7 @@ CREATE INDEX reindex_history_oid_index on index_watch.reindex_history(datid, ind
 CREATE INDEX reindex_history_index on index_watch.reindex_history(datname, schemaname, relname, indexrelname);
 
 --history of index sizes (not really neccessary to keep all this data but very useful for future analyzis of bloat trends
-CREATE TABLE index_watch.index_current_state 
+CREATE TABLE index_watch.index_current_state
 (
   id bigserial primary key,
   mtime timestamptz not null default now(),
@@ -62,7 +62,7 @@ CREATE TABLE index_watch.config
   indexrelname name,
   key text not null,
   value text,
-  comment text  
+  comment text
 );
 CREATE UNIQUE INDEX config_u1 on index_watch.config(key) WHERE datname IS NULL;
 CREATE UNIQUE INDEX config_u2 on index_watch.config(key, datname) WHERE schemaname IS NULL;
@@ -76,16 +76,16 @@ ALTER TABLE index_watch.config ADD CONSTRAINT inherit_check3 CHECK (schemaname  
 
 CREATE VIEW index_watch.history AS
   SELECT date_trunc('second', entry_timestamp)::timestamp AS ts,
-       datname AS db, schemaname AS schema, relname AS table, 
-       indexrelname AS index, pg_size_pretty(indexsize_before) AS size_before, 
+       datname AS db, schemaname AS schema, relname AS table,
+       indexrelname AS index, pg_size_pretty(indexsize_before) AS size_before,
        pg_size_pretty(indexsize_after) AS size_after,
-       (indexsize_before::float/indexsize_after)::numeric(12,2) AS ratio, 
-       pg_size_pretty(estimated_tuples) AS tuples, date_trunc('seconds', reindex_duration) AS duration 
+       (indexsize_before::float/indexsize_after)::numeric(12,2) AS ratio,
+       pg_size_pretty(estimated_tuples) AS tuples, date_trunc('seconds', reindex_duration) AS duration
   FROM index_watch.reindex_history ORDER BY id DESC;
 
 
 --DEFAULT GLOBAL settings
-INSERT INTO index_watch.config (key, value, comment) VALUES 
+INSERT INTO index_watch.config (key, value, comment) VALUES
 ('index_size_threshold', '10MB', 'ignore indexes under 10MB size unless forced entries found in history'),
 ('index_rebuild_scale_factor', '2', 'rebuild indexes by default estimated bloat over 2x'),
 ('minimum_reliable_index_size', '128kB', 'small indexes not reliable to use as gauge'),
@@ -109,7 +109,7 @@ INSERT INTO index_watch.tables_version VALUES(8);
 
 
 -- current proccessed index can be invalid
-CREATE TABLE index_watch.current_processed_index 
+CREATE TABLE index_watch.current_processed_index
 (
   id bigserial primary key,
   mtime timestamptz not null default now(),
