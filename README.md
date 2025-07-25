@@ -38,7 +38,7 @@ The framework of reindexing is implemented entirely inside Postgres, using:
 
 ## Supported Postgres versions
 
-PG13+ – all current Postgres versions are supported.
+Postgres 12 or newer.
 
 ### Maxim Boguk's formula
 
@@ -64,42 +64,15 @@ This defines pros and cons of this method.
 Pros:
 - any type of index is supported
 - very lightweight analysis
+- better precision than the traditional bloat estimate method for static-width columns (e.g., indexes on `bigint` or `timestamptz` columns), without the need to involve expensive `pgstattuple` scans
 
 Cons:
 - initial rebuild is required (TODO: implement import of baseline values from a fully reindexed clone)
-- method accuracy might be affected by a "size drift" – in case of significant change of avg. size of indexed values
+- for VARLENA data types (`text`, `jsonb`, etc), the method's accuracy might be affected by a "avg size drift" – in case of significant change of avg. size of indexed values, the baseline can silently shift, leading to false positive or false negative results in decision to reindex; however for large tables/indexes, the chances of this are very low
 
 ---
 
-pg_index_watch
-
-Utility for automatical rebuild of bloated indexes (a-la smart autovacuum to deal with index bloat) in PostgreSQL.
-
-## Program purpose
-Uncontrollable index bloat on frequently updated tables is a known issue in PostgreSQL.
-The built-in autovacuum doesn’t deal well with bloat regardless of its settings. 
-pg_index_watch resolves this issue by automatically rebuilding indexes when needed. 
-
-## Where to get support
-create github issue
-or email maxim.boguk@dataegret.com
-or write in telegram channel https://t.me/pg_index_watch_support
-
-
-## Concept
-With the introduction of REINDEX CONCURRENTLY in PostgreSQL 12 there is now a safe and (almost) lock-free way to rebuild bloated indexes.
-Despite that, the question remaines - based on which criteria do we determine a bloat and whether there is a need to rebuild the index.
-The pg_index_watch utilizes the ratio between index size and pg_class.reltuples (which is kept up-to-date with help of autovacuum/autoanalyze) to determine the extent of index bloat relative to the ideal situation of the newly built index.
-It also allows rebuilding bloated indexes of any type without dependency on pgstattuple for estimating index bloat.
-
-pg_index_watch offers following approach to this problem:
-
-PostgreSQL allows you to access (and almost free of charge):
-1) number of rows in the index (in pg_class.reltuples for the index) and 2) index size.
-
-Further on, assuming that the ratio of index size to the number of entries is constant (this is correct in 99.9% of cases), we can speculate that if, compared to its regular state, the ratio has doubled is is most certainly that the index have bloated 2x.
-
-Next, we receive a similar to autovacuum system that automatically tracks level of index bloat and rebuilds (via REINDEX CONCURRENTLY) them as needed.
+== pg_index_watch original help ==
 
 
 ## Basic requirements for installation and usage:
