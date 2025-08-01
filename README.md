@@ -43,7 +43,7 @@ The Roadmap covers three big areas:
     2. [ ] Index optimization according to configured goals (latency, size, WAL, write/HOT overhead, read overhead)
     3. [ ] Experimentation (hypothetical with HypoPG, real with DBLab)
     4. [ ] Query pattern classification
-    5. [ ] dvanced scoring; cost/benefit analysis
+    5. [ ] Advanced scoring; cost/benefit analysis
     6. [ ] Impact estimation before operations; "what-if" simulation (DBLab)
 
 ## Automated reindexing
@@ -59,7 +59,7 @@ Postgres 12 or newer.
 
 ### Maxim Boguk's formula
 
-Traditional index bloat estimation ([ioguix](https://github.com//pgsql-bloat-estimation/tree/master/btree)) is widely used but has certain limitations:
+Traditional index bloat estimation ([ioguix](https://github.com/ioguix/pgsql-bloat-estimation)) is widely used but has certain limitations:
 - only btree indexes are supported (GIN, GiST, hash, HNSW and others are not supported at all)
 - it can be quite off in certain cases
 - [the non-superuser version](https://github.com/ioguix/pgsql-bloat-estimation/blob/master/btree/btree_bloat.sql) inspects "only index on tables you are granted to read" (requires additional permissions), and in this case it is slow (~1000x slower than [the superuser version](https://github.com/ioguix/pgsql-bloat-estimation/blob/master/btree/btree_bloat-superuser.sql))
