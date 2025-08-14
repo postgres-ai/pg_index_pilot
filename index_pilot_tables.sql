@@ -79,7 +79,9 @@ create view index_pilot.history as
        datname as db, schemaname as schema, relname as table,
        indexrelname as index, pg_size_pretty(indexsize_before) as size_before,
        pg_size_pretty(indexsize_after) as size_after,
-       (indexsize_before::float/indexsize_after)::numeric(12,2) as ratio,
+       case when indexsize_after is not null and indexsize_after > 0 
+            then (indexsize_before::float/indexsize_after)::numeric(12,2) 
+            else null end as ratio,
        pg_size_pretty(estimated_tuples) as tuples, date_trunc('seconds', reindex_duration) as duration
   from index_pilot.reindex_history order by id DESC;
 

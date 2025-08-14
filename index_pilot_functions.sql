@@ -840,7 +840,7 @@ begin
     entry_timestamp
   ) values (
     _datname, _schemaname, _relname, _indexrelname,
-    _indexsize_before, _indexsize_before, _estimated_tuples, '0'::interval, '0'::interval,  -- Placeholder values
+    _indexsize_before, NULL, _estimated_tuples, NULL, NULL,  -- NULL for unknown values
     now()
   );
   
@@ -1073,8 +1073,8 @@ begin
             reindex_duration = now() - entry_timestamp
         where 
             datname = current_database()
-            and indexsize_after = indexsize_before  -- Placeholder values
-            and entry_timestamp > now() - interval '1 hour'  -- Recent records only
+            and indexsize_after is null  -- NULL indicates not yet completed
+            and entry_timestamp > now() - interval '24 hours'  -- Look at last 24 hours
             and exists (
                 select 1 
                 from index_pilot._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
