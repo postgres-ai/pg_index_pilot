@@ -191,7 +191,17 @@ echo '  <testsuite name="index_pilot_tests">' >> "$JUNIT_FILE"
 
 # Run each test
 START_TIME=$(date +%s)
-for test_file in "$TEST_DIR"/[0-9]*.sql; do
+# Use find to get test files to avoid glob issues
+TEST_FILES=$(find "$TEST_DIR" -name "[0-9]*.sql" -type f | sort)
+
+if [ -z "$TEST_FILES" ]; then
+    echo -e "${RED}Error: No test files found in $TEST_DIR${NC}"
+    exit 1
+fi
+
+echo "Running $(echo "$TEST_FILES" | wc -l) test files..."
+
+for test_file in $TEST_FILES; do
     if [ -f "$test_file" ]; then
         test_name=$(basename "$test_file" .sql)
         TEST_START=$(date +%s)

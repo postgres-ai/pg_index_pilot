@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="pg_index_pilot" tests="3" failures="3" time="2">
+  <testsuite name="index_pilot_tests">
+    <testcase name="01_basic_installation" classname="index_pilot" time="1">
+      <failure message="Test failed">psql: error: connection to server at &quot;database-1.cygpozlszrnd.us-east-1.rds.amazonaws.com&quot; (44.194.231.163), port 5432 failed: FATAL:  database &quot;test_pilot_final&quot; does not exist</failure>
+    </testcase>
+    <testcase name="02_functionality" classname="index_pilot" time="1">
+      <failure message="Test failed">psql: error: connection to server at &quot;database-1.cygpozlszrnd.us-east-1.rds.amazonaws.com&quot; (44.194.231.163), port 5432 failed: FATAL:  database &quot;test_pilot_final&quot; does not exist</failure>
+    </testcase>
+    <testcase name="03_security" classname="index_pilot" time="2">
+      <failure message="Test failed">psql: error: connection to server at &quot;database-1.cygpozlszrnd.us-east-1.rds.amazonaws.com&quot; (44.194.231.163), port 5432 failed: FATAL:  database &quot;test_pilot_final&quot; does not exist</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
