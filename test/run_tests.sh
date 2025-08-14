@@ -113,25 +113,6 @@ if [ "$SKIP_INSTALL" != "true" ]; then
     psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS dblink"
     psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS postgres_fdw"
     
-    # Setup FDW for testing (if possible)
-    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
-        DO \$\$
-        BEGIN
-            -- Try to create foreign server for self-connection
-            IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'index_pilot_self') THEN
-                EXECUTE 'CREATE SERVER index_pilot_self FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host ''$DB_HOST'', port ''$DB_PORT'', dbname ''$DB_NAME'')';
-            END IF;
-            -- Create user mapping for current user
-            EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR CURRENT_USER SERVER index_pilot_self OPTIONS (user ''$DB_USER'', password ''$DB_PASS'')';
-            -- For RDS, also create mapping for rds_superuser
-            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rds_superuser') THEN
-                EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR rds_superuser SERVER index_pilot_self OPTIONS (user ''$DB_USER'', password ''$DB_PASS'')';
-            END IF;
-        EXCEPTION WHEN OTHERS THEN
-            RAISE NOTICE 'Could not setup FDW (non-critical): %', SQLERRM;
-        END \$\$;
-    " 2>/dev/null || true
-    
     # Install schema and functions
     if [ -f "index_pilot_tables.sql" ]; then
         if ! run_sql "index_pilot_tables.sql" "Schema installation"; then
@@ -157,6 +138,40 @@ if [ "$SKIP_INSTALL" != "true" ]; then
     fi
     
     echo -e "${GREEN}✓ Installation complete${NC}"
+    
+    # Setup FDW for testing - using proper connection functions (after schema is installed)
+    echo "Setting up FDW connection for testing..."
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+        -- Use the built-in function to setup FDW properly
+        SELECT index_pilot.setup_fdw_self_connection('$DB_HOST', $DB_PORT, '$DB_NAME');
+    " || echo "Warning: Could not setup FDW server"
+    
+    # Setup user mapping with password if provided
+    if [ -n "$DB_PASS" ]; then
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+            SELECT index_pilot.setup_user_mapping('$DB_USER', '$DB_PASS');
+        " || echo "Warning: Could not setup user mapping"
+        
+        # For RDS, also setup mapping for rds_superuser with PROPER credentials
+        # Note: rds_superuser needs to connect as the actual postgres user
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+            DO \$\$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rds_superuser') THEN
+                    -- Drop existing mapping if any
+                    DROP USER MAPPING IF EXISTS FOR rds_superuser SERVER index_pilot_self;
+                    -- Create mapping with postgres user credentials
+                    CREATE USER MAPPING FOR rds_superuser SERVER index_pilot_self OPTIONS (user '$DB_USER', password '$DB_PASS');
+                END IF;
+            END \$\$;
+        " 2>/dev/null || true
+    else
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+            SELECT index_pilot.setup_user_mapping('$DB_USER', '');
+        " || echo "Warning: Could not setup user mapping"
+    fi
+    
+    echo -e "${GREEN}✓ FDW setup complete${NC}"
     echo ""
 fi
 

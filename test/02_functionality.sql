@@ -48,42 +48,34 @@ DECLARE
     _count INTEGER;
     _periodic_success BOOLEAN := false;
 BEGIN
-    -- First setup FDW connection for testing
+    -- FDW should already be setup by test runner, but try again with proper host
     BEGIN
-        PERFORM index_pilot.setup_fdw_self_connection('localhost', 5432, current_database());
-        PERFORM index_pilot.setup_user_mapping(current_user, '');
+        -- Get current connection host/port from inet_server_addr() and inet_server_port()
+        -- But these might not work in all environments, so just skip if already setup
+        PERFORM 1 FROM pg_foreign_server WHERE srvname = 'index_pilot_self';
+        IF NOT FOUND THEN
+            -- Try to setup with localhost as fallback
+            PERFORM index_pilot.setup_fdw_self_connection('localhost', 5432, current_database());
+            PERFORM index_pilot.setup_user_mapping(current_user, '');
+        END IF;
     EXCEPTION WHEN OTHERS THEN
-        -- Ignore if already exists or can't setup (will work with basic connection)
+        -- Ignore if already exists or can't setup
         NULL;
     END;
     
-    -- Try to run periodic scan
-    BEGIN
-        CALL index_pilot.periodic(false);
-        RAISE NOTICE 'PASS: Periodic scan (dry run) completed';
-        _periodic_success := true;
-    EXCEPTION WHEN OTHERS THEN
-        -- If periodic fails due to FDW, try without it
-        IF SQLERRM LIKE '%FDW%' OR SQLERRM LIKE '%USER MAPPING%' THEN
-            RAISE NOTICE 'INFO: Skipping periodic test (FDW not configured): %', SQLERRM;
-        ELSE
-            RAISE EXCEPTION 'FAIL: Periodic scan failed: %', SQLERRM;
-        END IF;
-    END;
+    -- Run periodic scan - this should work with FDW properly configured
+    CALL index_pilot.periodic(false);
+    RAISE NOTICE 'PASS: Periodic scan (dry run) completed';
     
-    -- Only verify indexes if periodic succeeded
-    IF _periodic_success THEN
-        SELECT COUNT(*) INTO _count 
-        FROM index_pilot.index_current_state 
-        WHERE schemaname = 'test_pilot';
-        
-        IF _count < 4 THEN
-            RAISE EXCEPTION 'FAIL: Expected at least 4 indexes, found %', _count;
-        END IF;
-        RAISE NOTICE 'PASS: % indexes detected in test schema', _count;
-    ELSE
-        RAISE NOTICE 'INFO: Skipping index detection test (periodic did not run due to FDW)';
+    -- Verify indexes were detected
+    SELECT COUNT(*) INTO _count 
+    FROM index_pilot.index_current_state 
+    WHERE schemaname = 'test_pilot';
+    
+    IF _count < 4 THEN
+        RAISE EXCEPTION 'FAIL: Expected at least 4 indexes, found %', _count;
     END IF;
+    RAISE NOTICE 'PASS: % indexes detected in test schema', _count;
 END $$;
 
 -- 3. Test force populate baseline
@@ -97,79 +89,49 @@ BEGIN
     );
     RAISE NOTICE 'PASS: Force populate baseline completed';
 EXCEPTION WHEN OTHERS THEN
-    -- Force populate can fail if no indexes are in the state table or FDW not configured
-    IF SQLERRM LIKE '%no rows%' OR SQLERRM LIKE '%does not exist%' OR SQLERRM LIKE '%FDW%' OR SQLERRM LIKE '%USER MAPPING%' THEN
-        RAISE NOTICE 'INFO: Skipping force populate (requires FDW or no indexes): %', SQLERRM;
-    ELSE
-        RAISE EXCEPTION 'FAIL: Force populate failed: %', SQLERRM;
-    END IF;
+    RAISE EXCEPTION 'FAIL: Force populate failed: %', SQLERRM;
 END $$;
 
--- 4. Verify baseline was established (if any indexes exist)
+-- 4. Verify baseline was established
 DO $$
 DECLARE
     _count INTEGER;
-    _total INTEGER;
 BEGIN
-    SELECT COUNT(*) INTO _total
+    SELECT COUNT(*) INTO _count 
     FROM index_pilot.index_current_state 
-    WHERE schemaname = 'test_pilot';
+    WHERE schemaname = 'test_pilot' 
+    AND best_ratio IS NOT NULL;
     
-    IF _total > 0 THEN
-        SELECT COUNT(*) INTO _count 
-        FROM index_pilot.index_current_state 
-        WHERE schemaname = 'test_pilot' 
-        AND best_ratio IS NOT NULL;
-        
-        IF _count < 1 THEN
-            RAISE EXCEPTION 'FAIL: No baselines established';
-        END IF;
-        RAISE NOTICE 'PASS: Baseline established for % indexes', _count;
-    ELSE
-        RAISE NOTICE 'INFO: Skipping baseline verification (no indexes to check)';
+    IF _count < 1 THEN
+        RAISE EXCEPTION 'FAIL: No baselines established';
     END IF;
+    RAISE NOTICE 'PASS: Baseline established for % indexes', _count;
 END $$;
 
 -- 5. Test bloat estimation
 DO $$
 DECLARE
     _count INTEGER;
-    _total INTEGER;
 BEGIN
-    -- Check if we have indexes to test with
-    SELECT COUNT(*) INTO _total
-    FROM index_pilot.index_current_state 
-    WHERE schemaname = 'test_pilot';
+    -- Create some bloat
+    DELETE FROM test_pilot.test_table WHERE id % 3 = 0;
+    UPDATE test_pilot.test_table SET status = 'updated' WHERE id % 5 = 0;
+    -- Note: VACUUM cannot run in transaction, just ANALYZE
+    ANALYZE test_pilot.test_table;
     
-    IF _total > 0 THEN
-        -- Create some bloat
-        DELETE FROM test_pilot.test_table WHERE id % 3 = 0;
-        UPDATE test_pilot.test_table SET status = 'updated' WHERE id % 5 = 0;
-        -- Note: VACUUM cannot run in transaction, just ANALYZE
-        ANALYZE test_pilot.test_table;
-        
-        -- Try to update current state
-        BEGIN
-            CALL index_pilot.periodic(false);
-        EXCEPTION WHEN OTHERS THEN
-            -- Ignore if FDW issue
-            NULL;
-        END;
-        
-        -- Check bloat estimates
-        SELECT COUNT(*) INTO _count
-        FROM index_pilot.get_index_bloat_estimates(current_database())
-        WHERE schemaname = 'test_pilot'
-        AND estimated_bloat IS NOT NULL;
-        
-        IF _count >= 1 THEN
-            RAISE NOTICE 'PASS: Bloat estimates available for % indexes', _count;
-        ELSE
-            RAISE NOTICE 'INFO: No bloat estimates (may require FDW connection)';
-        END IF;
-    ELSE
-        RAISE NOTICE 'INFO: Skipping bloat estimation test (no indexes to check)';
+    -- Update current state
+    CALL index_pilot.periodic(false);
+    
+    -- Check bloat estimates
+    SELECT COUNT(*) INTO _count
+    FROM index_pilot.get_index_bloat_estimates(current_database())
+    WHERE schemaname = 'test_pilot'
+    AND estimated_bloat IS NOT NULL;
+    
+    IF _count < 1 THEN
+        RAISE EXCEPTION 'FAIL: No bloat estimates generated';
     END IF;
+    RAISE NOTICE 'PASS: Bloat estimates available for % indexes', _count;
 END $$;
 
 -- 7. Test reindex threshold detection
