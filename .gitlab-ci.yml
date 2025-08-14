@@ -37,6 +37,7 @@ variables:
       echo "Running test suite..."
       chmod +x test/run_tests.sh
       # Run from root directory so SQL files can be found
+      # Note: FDW needs to connect back to the database, use localhost for loopback in Docker
       ./test/run_tests.sh -h postgres -u postgres -w "$POSTGRES_PASSWORD" -d test_index_pilot
   allow_failure: false
   artifacts:

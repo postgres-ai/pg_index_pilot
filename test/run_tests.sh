@@ -143,8 +143,20 @@ if [ "$SKIP_INSTALL" != "true" ]; then
     echo "Setting up FDW connection for testing..."
     
     # Try different hostnames for FDW connection
-    # In CI/Docker, 'localhost' often works better than service name for loopback
-    for FDW_HOST in "$DB_HOST" "localhost" "127.0.0.1"; do
+    # In CI/Docker, we need to find the right hostname for FDW to connect back
+    FDW_SETUP_SUCCESS=false
+    
+    # In GitLab CI, the postgres service is accessible via 'postgres' hostname
+    # But FDW needs to connect from within the database, so we need the right internal hostname
+    if [ "$DB_HOST" = "postgres" ]; then
+        # In CI, try postgres first (service name), then localhost for loopback
+        FDW_HOSTS="postgres localhost 127.0.0.1"
+    else
+        # For external hosts (like RDS), use the actual hostname
+        FDW_HOSTS="$DB_HOST"
+    fi
+    
+    for FDW_HOST in $FDW_HOSTS; do
         echo "Trying FDW setup with host: $FDW_HOST"
         
         # Drop existing server if any
@@ -157,9 +169,16 @@ if [ "$SKIP_INSTALL" != "true" ]; then
             SELECT index_pilot.setup_fdw_self_connection('$FDW_HOST', $DB_PORT, '$DB_NAME');
         " 2>/dev/null; then
             echo "FDW server created with host: $FDW_HOST"
+            FDW_SETUP_SUCCESS=true
             break
         fi
     done
+    
+    if [ "$FDW_SETUP_SUCCESS" = "false" ]; then
+        echo -e "${RED}ERROR: Failed to setup FDW server with any hostname${NC}"
+        echo "Tried: $DB_HOST, localhost, 127.0.0.1"
+        exit 1
+    fi
     
     # Setup user mapping with password if provided
     if [ -n "$DB_PASS" ]; then
@@ -186,15 +205,19 @@ if [ "$SKIP_INSTALL" != "true" ]; then
         " || echo "Warning: Could not setup user mapping"
     fi
     
-    # Test FDW connection actually works
+    # Test FDW connection actually works - REQUIRED
     echo "Testing FDW connection..."
-    if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+    if ! psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
         SELECT index_pilot._connect_securely('$DB_NAME');
-    " 2>/dev/null; then
-        echo -e "${GREEN}✓ FDW connection test successful${NC}"
-    else
-        echo -e "${YELLOW}Warning: FDW connection test failed - some tests may be skipped${NC}"
+    "; then
+        echo -e "${RED}ERROR: FDW connection test failed${NC}"
+        echo "The tool requires FDW to function. Please check:"
+        echo "1. postgres_fdw extension is installed"
+        echo "2. FDW server is properly configured" 
+        echo "3. User mappings are correct"
+        exit 1
     fi
+    echo -e "${GREEN}✓ FDW connection test successful${NC}"
     
     echo -e "${GREEN}✓ FDW setup complete${NC}"
     echo ""
