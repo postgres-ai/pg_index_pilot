@@ -18,10 +18,17 @@ variables:
     - apt-get update -qq && apt-get install -y postgresql-client
     - |
       echo "Waiting for PostgreSQL to be ready..."
-      until pg_isready -h postgres -p 5432 -U postgres; do
-        echo "Waiting for database..."
-        sleep 2
+      WAIT_TIME=0
+      until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1" > /dev/null 2>&1 || [ $WAIT_TIME -eq 15 ]; do
+        echo "Waiting for database... ($WAIT_TIME seconds)"
+        sleep 1
+        WAIT_TIME=$((WAIT_TIME + 1))
       done
+      if [ $WAIT_TIME -eq 15 ]; then
+        echo "ERROR: Database failed to start within 15 seconds"
+        exit 1
+      fi
+      echo "Database ready after $WAIT_TIME seconds"
     - |
       echo "PostgreSQL version:"
       psql -h postgres -U postgres -c "SELECT version();"
@@ -85,6 +92,19 @@ test:nonsuperuser:
     - postgres:16-alpine
   script:
     - apt-get update -qq && apt-get install -y postgresql-client
+    - |
+      echo "Waiting for PostgreSQL to be ready..."
+      WAIT_TIME=0
+      until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1" > /dev/null 2>&1 || [ $WAIT_TIME -eq 15 ]; do
+        echo "Waiting for database... ($WAIT_TIME seconds)"
+        sleep 1
+        WAIT_TIME=$((WAIT_TIME + 1))
+      done
+      if [ $WAIT_TIME -eq 15 ]; then
+        echo "ERROR: Database failed to start within 15 seconds"
+        exit 1
+      fi
+      echo "Database ready after $WAIT_TIME seconds"
     - |
       echo "Setting up non-superuser test environment..."
       export PGPASSWORD=postgres
