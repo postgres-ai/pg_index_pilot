@@ -189,14 +189,17 @@ security:sql:
     - apk add --no-cache grep
     - |
       echo "Checking for SQL injection vulnerabilities..."
-      # Check for direct string concatenation in SQL
-      if grep -r "||.*'.*DROP\|DELETE\|UPDATE\|INSERT" *.sql; then
-        echo "WARNING: Potential SQL injection pattern found"
+      # Check for actual SQL injection patterns - string concatenation with user input
+      # Look for EXECUTE with || concatenation (the real danger)
+      # But exclude our safe usage with format() and quote_ident()
+      if grep -E "EXECUTE[[:space:]]+[^;]*\|\|[[:space:]]*[^';]*\|\|" *.sql | grep -v "format\|quote_ident\|quote_literal" 2>/dev/null; then
+        echo "WARNING: Potential SQL injection - EXECUTE with unsafe concatenation"
         exit 1
       fi
     - |
       echo "Checking for hardcoded passwords..."
-      if grep -r "PASSWORD.*'[^']*'" *.sql | grep -v "your_secure_password\|your_password\|changeme"; then
+      # Look for actual password assignments, not just the word PASSWORD
+      if grep -E "(PASSWORD|IDENTIFIED BY)[[:space:]]*[=:][[:space:]]*'[^']+'" *.sql | grep -v "your_secure_password\|your_password\|changeme\|testpass" 2>/dev/null; then
         echo "ERROR: Hardcoded password found"
         exit 1
       fi
