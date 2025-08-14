@@ -110,6 +110,25 @@ if [ "$SKIP_INSTALL" != "true" ]; then
     $PSQL -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS dblink"
     $PSQL -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS postgres_fdw"
     
+    # Setup FDW for testing (if possible)
+    $PSQL -d "$DB_NAME" -c "
+        DO \$\$
+        BEGIN
+            -- Try to create foreign server for self-connection
+            IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'index_pilot_self') THEN
+                EXECUTE 'CREATE SERVER index_pilot_self FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host ''$DB_HOST'', port ''$DB_PORT'', dbname ''$DB_NAME'')';
+            END IF;
+            -- Create user mapping for current user
+            EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR CURRENT_USER SERVER index_pilot_self OPTIONS (user ''$DB_USER'', password ''$DB_PASS'')';
+            -- For RDS, also create mapping for rds_superuser
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rds_superuser') THEN
+                EXECUTE 'CREATE USER MAPPING IF NOT EXISTS FOR rds_superuser SERVER index_pilot_self OPTIONS (user ''$DB_USER'', password ''$DB_PASS'')';
+            END IF;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not setup FDW (non-critical): %', SQLERRM;
+        END \$\$;
+    " 2>/dev/null || true
+    
     # Install schema and functions
     if [ -f "index_pilot_tables.sql" ]; then
         run_sql "index_pilot_tables.sql" "Schema installation"

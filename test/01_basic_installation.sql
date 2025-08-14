@@ -95,11 +95,11 @@ DO $$
 DECLARE
     _config_count INTEGER;
 BEGIN
-    SELECT COUNT(*) INTO _count FROM index_pilot.config;
-    IF _count < 4 THEN
-        RAISE EXCEPTION 'FAIL: Missing default configuration (found % entries)', _count;
+    SELECT COUNT(*) INTO _config_count FROM index_pilot.config;
+    IF _config_count < 4 THEN
+        RAISE EXCEPTION 'FAIL: Missing default configuration (found % entries)', _config_count;
     END IF;
-    RAISE NOTICE 'PASS: Default configuration present (% entries)', _count;
+    RAISE NOTICE 'PASS: Default configuration present (% entries)', _config_count;
 END $$;
 
 \echo 'TEST 01: PASSED'
