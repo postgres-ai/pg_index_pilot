@@ -222,7 +222,8 @@ if [ "$SKIP_INSTALL" != "true" ]; then
             
             # Get the actual IP of the postgres container in Docker network
             # In GitLab CI, containers can reach each other via Docker network IPs
-            POSTGRES_IP=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -tAc "SELECT inet_server_addr()::text" 2>/dev/null || echo "")
+            # Remove CIDR notation if present (e.g., 172.17.0.3/32 -> 172.17.0.3)
+            POSTGRES_IP=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -tAc "SELECT host(inet_server_addr())" 2>/dev/null || echo "")
             
             if [ -n "$POSTGRES_IP" ] && [ "$POSTGRES_IP" != "" ]; then
                 echo "Found PostgreSQL server IP: $POSTGRES_IP"
