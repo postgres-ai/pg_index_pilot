@@ -102,7 +102,7 @@ DECLARE
 BEGIN
    SELECT version INTO STRICT _tables_version FROM index_pilot.tables_version;
    WHILE (_tables_version<_required_version) LOOP
-      EXECUTE 'SELECT index_pilot._structure_version_'||_tables_version||'_'||_tables_version+1||'()';
+      EXECUTE format('SELECT index_pilot._structure_version_%s_%s()', _tables_version, _tables_version+1);
    _tables_version := _tables_version+1;
 END LOOP;
     RETURN;
