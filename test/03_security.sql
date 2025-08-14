@@ -8,138 +8,138 @@
 \echo '======================================'
 
 -- 1. Test non-superuser compatibility
-DO $$
-DECLARE
-    _is_superuser BOOLEAN;
-BEGIN
-    SELECT usesuper INTO _is_superuser 
-    FROM pg_user 
-    WHERE usename = current_user;
+do $$
+declare
+    _is_superuser boolean;
+begin
+    select usesuper into _is_superuser 
+    from pg_user 
+    where usename = current_user;
     
-    IF _is_superuser THEN
-        RAISE NOTICE 'INFO: Running as superuser - non-superuser tests skipped';
-    ELSE
-        RAISE NOTICE 'PASS: Running as non-superuser';
-    END IF;
-END $$;
+    if _is_superuser then
+        raise notice 'INFO: Running as superuser - non-superuser tests skipped';
+    else
+        raise notice 'PASS: Running as non-superuser';
+    end if;
+end $$;
 
 -- 2. Verify schema permissions
-DO $$
-DECLARE
-    _has_usage BOOLEAN;
-BEGIN
-    SELECT has_schema_privilege(current_user, 'index_pilot', 'USAGE') INTO _has_usage;
+do $$
+declare
+    _has_usage boolean;
+begin
+    select has_schema_privilege(current_user, 'index_pilot', 'usage') into _has_usage;
     
-    IF NOT _has_usage THEN
-        RAISE EXCEPTION 'FAIL: Current user lacks USAGE privilege on index_pilot schema';
-    END IF;
-    RAISE NOTICE 'PASS: Schema permissions verified';
-END $$;
+    if not _has_usage then
+        raise exception 'FAIL: Current user lacks usage privilege on index_pilot schema';
+    end if;
+    raise notice 'PASS: Schema permissions verified';
+end $$;
 
 -- 3. Test SQL injection protection in function parameters
-DO $$
-BEGIN
+do $$
+begin
     -- Try to inject SQL in schema name
-    BEGIN
-        PERFORM index_pilot.get_index_bloat_estimates(
-            current_database() || '; DROP TABLE index_pilot.config; --'
+    begin
+        perform index_pilot.get_index_bloat_estimates(
+            current_database() || '; drop table index_pilot.config; --'
         );
         -- If we get here, the injection attempt was properly handled
-        RAISE NOTICE 'PASS: SQL injection protection working (database name)';
-    EXCEPTION WHEN OTHERS THEN
+        raise notice 'PASS: SQL injection protection working (database name)';
+    exception when others then
         -- Expected to fail safely
-        RAISE NOTICE 'PASS: SQL injection blocked (database name)';
-    END;
-END $$;
+        raise notice 'PASS: SQL injection blocked (database name)';
+    end;
+end $$;
 
 -- 4. Verify sensitive functions are protected
-DO $$
-DECLARE
-    _func_count INTEGER;
-BEGIN
+do $$
+declare
+    _func_count integer;
+begin
     -- Check that internal functions start with underscore
-    SELECT COUNT(*) INTO _func_count
-    FROM pg_proc p
-    JOIN pg_namespace n ON p.pronamespace = n.oid
-    WHERE n.nspname = 'index_pilot'
-    AND p.proname LIKE '\_%'
-    AND p.proname NOT IN ('_check_pg_version_bugfixed', '_check_pg14_version_bugfixed');
+    select count(*) into _func_count
+    from pg_proc p
+    join pg_namespace n on p.pronamespace = n.oid
+    where n.nspname = 'index_pilot'
+    and p.proname like '\_%'
+    and p.proname not in ('_check_pg_version_bugfixed', '_check_pg14_version_bugfixed');
     
-    IF _func_count < 5 THEN
-        RAISE WARNING 'WARNING: Few internal functions found (%), review naming convention', _func_count;
-    ELSE
-        RAISE NOTICE 'PASS: % internal functions use underscore prefix', _func_count;
-    END IF;
-END $$;
+    if _func_count < 5 then
+        raise WARNING 'WARNING: Few internal functions found (%), review naming convention', _func_count;
+    else
+        raise notice 'PASS: % internal functions use underscore prefix', _func_count;
+    end if;
+end $$;
 
 -- 5. Test connection security (FDW/dblink)
-DO $$
-DECLARE
-    _has_fdw BOOLEAN;
-    _fdw_status RECORD;
-BEGIN
+do $$
+declare
+    _has_fdw boolean;
+    _fdw_status record;
+begin
     -- Check if postgres_fdw is available
-    SELECT EXISTS (
-        SELECT 1 FROM pg_extension WHERE extname = 'postgres_fdw'
-    ) INTO _has_fdw;
+    select exists (
+        select 1 from pg_extension where extname = 'postgres_fdw'
+    ) into _has_fdw;
     
-    IF _has_fdw THEN
+    if _has_fdw then
         -- Check FDW security status
-        FOR _fdw_status IN 
-            SELECT * FROM index_pilot.check_fdw_security_status() 
-        LOOP
-            IF _fdw_status.status IN ('INSTALLED', 'GRANTED', 'EXISTS', 'CONFIGURED', 'OK') THEN
-                RAISE NOTICE 'INFO: FDW % - %', _fdw_status.component, _fdw_status.status;
-            ELSIF _fdw_status.status = 'MISSING' AND _fdw_status.component LIKE '%server%' THEN
+        for _fdw_status in 
+            select * from index_pilot.check_fdw_security_status() 
+        loop
+            if _fdw_status.status in ('INSTALLED', 'GRANTED', 'exists', 'CONFIGURED', 'OK') then
+                raise notice 'INFO: FDW % - %', _fdw_status.component, _fdw_status.status;
+            ELSIF _fdw_status.status = 'MISSING' and _fdw_status.component like '%server%' then
                 -- Server not configured yet is OK for tests
-                RAISE NOTICE 'INFO: FDW % - Not configured (OK for testing)', _fdw_status.component;
-            ELSE
-                RAISE WARNING 'WARNING: FDW % - %', _fdw_status.component, _fdw_status.status;
-            END IF;
-        END LOOP;
-        RAISE NOTICE 'PASS: FDW security checks completed';
-    ELSE
-        RAISE NOTICE 'INFO: postgres_fdw not installed - skipping FDW tests';
-    END IF;
-END $$;
+                raise notice 'INFO: FDW % - Not configured (OK for testing)', _fdw_status.component;
+            else
+                raise WARNING 'WARNING: FDW % - %', _fdw_status.component, _fdw_status.status;
+            end if;
+        end loop;
+        raise notice 'PASS: FDW security checks completed';
+    else
+        raise notice 'INFO: postgres_fdw not installed - skipping FDW tests';
+    end if;
+end $$;
 
 -- 6. Verify no plaintext passwords in config
-DO $$
-DECLARE
-    _password_count INTEGER;
-BEGIN
-    SELECT COUNT(*) INTO _password_count
-    FROM index_pilot.config
-    WHERE value ILIKE '%password%' 
-    OR key ILIKE '%password%'
-    OR comment ILIKE '%password%';
+do $$
+declare
+    _password_count integer;
+begin
+    select count(*) into _password_count
+    from index_pilot.config
+    where value ILIKE '%password%' 
+    or key ILIKE '%password%'
+    or comment ILIKE '%password%';
     
-    IF _password_count > 0 THEN
-        RAISE EXCEPTION 'FAIL: Found % potential password entries in config', _password_count;
-    END IF;
-    RAISE NOTICE 'PASS: No plaintext passwords in configuration';
-END $$;
+    if _password_count > 0 then
+        raise exception 'FAIL: Found % potential password entries in config', _password_count;
+    end if;
+    raise notice 'PASS: No plaintext passwords in configuration';
+end $$;
 
 -- 7. Test privilege escalation prevention
-DO $$
-BEGIN
+do $$
+begin
     -- Try to access pg_authid (superuser only)
-    BEGIN
-        PERFORM index_pilot._remote_get_indexes_info(
+    begin
+        perform index_pilot._remote_get_indexes_info(
             current_database(), 
             'pg_catalog', 
             'pg_authid', 
-            NULL
+            null
         );
         -- If we get here and aren't superuser, that's bad
-        IF NOT EXISTS (SELECT 1 FROM pg_user WHERE usename = current_user AND usesuper) THEN
-            RAISE EXCEPTION 'FAIL: Able to access restricted catalog as non-superuser';
-        END IF;
-    EXCEPTION WHEN OTHERS THEN
+        if not exists (select 1 from pg_user where usename = current_user and usesuper) then
+            raise exception 'FAIL: Able to access restricted catalog as non-superuser';
+        end if;
+    exception when others then
         -- Expected to fail for non-superuser
-        RAISE NOTICE 'PASS: Cannot access restricted catalogs';
-    END;
-END $$;
+        raise notice 'PASS: Cannot access restricted catalogs';
+    end;
+end $$;
 
 \echo 'TEST 03: PASSED'
 \echo ''

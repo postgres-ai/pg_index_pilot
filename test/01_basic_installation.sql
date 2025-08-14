@@ -9,98 +9,98 @@
 \echo '======================================'
 
 -- 1. Verify schema exists
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'index_pilot') THEN
-        RAISE EXCEPTION 'FAIL: index_pilot schema not found';
-    END IF;
-    RAISE NOTICE 'PASS: Schema index_pilot exists';
-END $$;
+do $$
+begin
+    if not exists (select 1 from pg_namespace where nspname = 'index_pilot') then
+        raise exception 'FAIL: index_pilot schema not found';
+    end if;
+    raise notice 'PASS: Schema index_pilot exists';
+end $$;
 
 -- 2. Verify version function
-DO $$
-DECLARE
-    _version TEXT;
-BEGIN
-    SELECT index_pilot.version() INTO _version;
-    IF _version IS NULL OR _version = '' THEN
-        RAISE EXCEPTION 'FAIL: Version function returned empty';
-    END IF;
-    RAISE NOTICE 'PASS: Version function works (%))', _version;
-END $$;
+do $$
+declare
+    _version text;
+begin
+    select index_pilot.version() into _version;
+    if _version is null or _version = '' then
+        raise exception 'FAIL: Version function returned empty';
+    end if;
+    raise notice 'PASS: Version function works (%))', _version;
+end $$;
 
 -- 3. Verify required tables exist
-DO $$
-DECLARE
-    _table_count INTEGER;
-    _expected_tables TEXT[] := ARRAY[
+do $$
+declare
+    _table_count integer;
+    _expected_tables text[] := ARRAY[
         'config',
         'index_current_state', 
         'reindex_history',
         'current_processed_index',
         'tables_version'
     ];
-    _table TEXT;
-BEGIN
-    FOREACH _table IN ARRAY _expected_tables LOOP
-        IF NOT EXISTS (
-            SELECT 1 FROM information_schema.tables 
-            WHERE table_schema = 'index_pilot' 
-            AND table_name = _table
-        ) THEN
-            RAISE EXCEPTION 'FAIL: Required table index_pilot.% not found', _table;
-        END IF;
-    END LOOP;
-    RAISE NOTICE 'PASS: All required tables exist';
-END $$;
+    _table text;
+begin
+    foreach _table in ARRAY _expected_tables loop
+        if not exists (
+            select 1 from information_schema.tables 
+            where table_schema = 'index_pilot' 
+            and table_name = _table
+        ) then
+            raise exception 'FAIL: Required table index_pilot.% not found', _table;
+        end if;
+    end loop;
+    raise notice 'PASS: All required tables exist';
+end $$;
 
 -- 4. Verify core functions exist
-DO $$
-DECLARE
-    _functions TEXT[] := ARRAY[
+do $$
+declare
+    _functions text[] := ARRAY[
         'periodic',
         'do_reindex',
         'get_index_bloat_estimates',
         'check_permissions'
     ];
-    _func TEXT;
-BEGIN
-    FOREACH _func IN ARRAY _functions LOOP
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_proc p
-            JOIN pg_namespace n ON p.pronamespace = n.oid
-            WHERE n.nspname = 'index_pilot' 
-            AND p.proname = _func
-        ) THEN
-            RAISE EXCEPTION 'FAIL: Required function index_pilot.% not found', _func;
-        END IF;
-    END LOOP;
-    RAISE NOTICE 'PASS: All core functions exist';
-END $$;
+    _func text;
+begin
+    foreach _func in ARRAY _functions loop
+        if not exists (
+            select 1 from pg_proc p
+            join pg_namespace n on p.pronamespace = n.oid
+            where n.nspname = 'index_pilot' 
+            and p.proname = _func
+        ) then
+            raise exception 'FAIL: Required function index_pilot.% not found', _func;
+        end if;
+    end loop;
+    raise notice 'PASS: All core functions exist';
+end $$;
 
 -- 5. Verify permissions check runs
-DO $$
-DECLARE
-    _count INTEGER;
-BEGIN
-    SELECT COUNT(*) INTO _count FROM index_pilot.check_permissions();
-    IF _count < 1 THEN
-        RAISE EXCEPTION 'FAIL: check_permissions returned no results';
-    END IF;
-    RAISE NOTICE 'PASS: Permissions check returns % items', _count;
-END $$;
+do $$
+declare
+    _count integer;
+begin
+    select count(*) into _count from index_pilot.check_permissions();
+    if _count < 1 then
+        raise exception 'FAIL: check_permissions returned no results';
+    end if;
+    raise notice 'PASS: Permissions check returns % items', _count;
+end $$;
 
 -- 6. Verify default configuration
-DO $$
-DECLARE
-    _config_count INTEGER;
-BEGIN
-    SELECT COUNT(*) INTO _config_count FROM index_pilot.config;
-    IF _config_count < 4 THEN
-        RAISE EXCEPTION 'FAIL: Missing default configuration (found % entries)', _config_count;
-    END IF;
-    RAISE NOTICE 'PASS: Default configuration present (% entries)', _config_count;
-END $$;
+do $$
+declare
+    _config_count integer;
+begin
+    select count(*) into _config_count from index_pilot.config;
+    if _config_count < 4 then
+        raise exception 'FAIL: Missing default configuration (found % entries)', _config_count;
+    end if;
+    raise notice 'PASS: Default configuration present (% entries)', _config_count;
+end $$;
 
 \echo 'TEST 01: PASSED'
 \echo ''
