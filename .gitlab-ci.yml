@@ -1,0 +1,174 @@
+# GitLab CI/CD configuration for pg_index_pilot
+
+stages:
+  - test
+  - security
+
+variables:
+  POSTGRES_DB: test_index_pilot
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_HOST: postgres
+  POSTGRES_HOST_AUTH_METHOD: trust
+
+# Test against multiple PostgreSQL versions
+.test_template: &test_definition
+  stage: test
+  script:
+    - apt-get update -qq && apt-get install -y postgresql-client
+    - |
+      echo "Waiting for PostgreSQL to be ready..."
+      until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for database..."
+        sleep 2
+      done
+    - |
+      echo "PostgreSQL version:"
+      psql -h postgres -U postgres -c "SELECT version();"
+    - |
+      echo "Running test suite..."
+      cd test
+      ./run_tests.sh -h postgres -u postgres -d test_index_pilot
+  allow_failure: false
+  artifacts:
+    reports:
+      junit: test-results.xml
+    when: always
+    paths:
+      - test-results.xml
+    expire_in: 1 week
+
+# Test PostgreSQL 12 (minimum supported version)
+test:pg12:
+  <<: *test_definition
+  services:
+    - postgres:12-alpine
+  tags:
+    - docker
+
+# Test PostgreSQL 13
+test:pg13:
+  <<: *test_definition
+  services:
+    - postgres:13-alpine
+  tags:
+    - docker
+
+# Test PostgreSQL 14
+test:pg14:
+  <<: *test_definition
+  services:
+    - postgres:14-alpine
+  tags:
+    - docker
+
+# Test PostgreSQL 15
+test:pg15:
+  <<: *test_definition
+  services:
+    - postgres:15-alpine
+  tags:
+    - docker
+
+# Test PostgreSQL 16 (latest stable)
+test:pg16:
+  <<: *test_definition
+  services:
+    - postgres:16-alpine
+  tags:
+    - docker
+
+# Test on managed service simulation (non-superuser)
+test:nonsuperuser:
+  stage: test
+  services:
+    - postgres:16-alpine
+  script:
+    - apt-get update -qq && apt-get install -y postgresql-client
+    - |
+      echo "Setting up non-superuser test environment..."
+      export PGPASSWORD=postgres
+      psql -h postgres -U postgres << EOF
+      CREATE DATABASE test_index_pilot;
+      CREATE USER index_pilot WITH PASSWORD 'testpass';
+      GRANT CONNECT, CREATE ON DATABASE test_index_pilot TO index_pilot;
+      \c test_index_pilot
+      CREATE EXTENSION dblink;
+      CREATE EXTENSION postgres_fdw;
+      GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO index_pilot;
+      GRANT EXECUTE ON FUNCTION dblink_connect_u(text,text) TO index_pilot;
+      EOF
+    - |
+      echo "Installing as non-superuser..."
+      export PGPASSWORD=testpass
+      psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_tables.sql
+      psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_functions.sql
+    - |
+      echo "Running non-superuser tests..."
+      cd test
+      SKIP_INSTALL=true ./run_tests.sh -h postgres -u index_pilot -w testpass -d test_index_pilot
+  tags:
+    - docker
+  allow_failure: false
+
+# Security scanning
+security:secrets:
+  stage: security
+  image: python:3.11-slim
+  script:
+    - pip install detect-secrets
+    - detect-secrets scan --baseline .secrets.baseline
+    - |
+      if detect-secrets audit .secrets.baseline; then
+        echo "No secrets detected"
+      else
+        echo "Potential secrets found!"
+        exit 1
+      fi
+  tags:
+    - docker
+  allow_failure: true
+
+# SQL injection and security check
+security:sql:
+  stage: security
+  image: postgres:16-alpine
+  services:
+    - postgres:16-alpine
+  script:
+    - |
+      echo "Checking for SQL injection vulnerabilities..."
+      # Check for direct string concatenation in SQL
+      if grep -r "||.*'.*DROP\|DELETE\|UPDATE\|INSERT" *.sql; then
+        echo "WARNING: Potential SQL injection pattern found"
+        exit 1
+      fi
+    - |
+      echo "Checking for hardcoded passwords..."
+      if grep -r "PASSWORD.*'[^']*'" *.sql | grep -v "your_secure_password\|your_password\|changeme"; then
+        echo "ERROR: Hardcoded password found"
+        exit 1
+      fi
+    - echo "Security checks passed"
+  tags:
+    - docker
+  allow_failure: false
+
+# Code quality check
+quality:sql:
+  stage: test
+  image: postgres:16-alpine
+  script:
+    - |
+      echo "Checking SQL syntax..."
+      for file in *.sql test/*.sql; do
+        if [ -f "$file" ]; then
+          echo "Checking $file..."
+          # Use PostgreSQL to parse check the SQL
+          psql -h localhost -U postgres -f "$file" --set ON_ERROR_STOP=on -c "BEGIN; ROLLBACK;" 2>&1 | grep -E "ERROR|FATAL" && exit 1 || true
+        fi
+      done
+    - echo "SQL syntax check passed"
+  tags:
+    - docker
+  allow_failure: true
