@@ -14,9 +14,9 @@ end $$;
 -- Check PostgreSQL version
 do $$
 begin
-    if (select setting from pg_settings where name='server_version_num') < '12'
+    if (select setting from pg_settings where name='server_version_num') < '13'
     then
-        raise exception 'pg_index_pilot works only with PostgreSQL 12 or higher';
+        raise exception 'pg_index_pilot works only with PostgreSQL 13 or higher';
     end if;
     
     raise notice 'PostgreSQL version: %', current_setting('server_version');

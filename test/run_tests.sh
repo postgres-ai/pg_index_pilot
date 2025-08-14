@@ -88,8 +88,8 @@ run_sql() {
 # Check PostgreSQL version
 echo "Checking PostgreSQL version..."
 PG_VERSION=$($PSQL -d postgres -tAc "SELECT current_setting('server_version_num')::int")
-if [ "$PG_VERSION" -lt 120000 ]; then
-    echo -e "${RED}Error: PostgreSQL 12 or higher required (found: $PG_VERSION)${NC}"
+if [ "$PG_VERSION" -lt 130000 ]; then
+    echo -e "${RED}Error: PostgreSQL 13 or higher required (found: $PG_VERSION)${NC}"
     exit 1
 fi
 echo -e "${GREEN}✓ PostgreSQL version OK${NC}"

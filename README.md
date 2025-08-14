@@ -55,7 +55,7 @@ The framework of reindexing is implemented entirely inside Postgres, using:
 
 ## Supported Postgres versions
 
-Postgres 12 or newer.
+Postgres 13 or newer.
 
 ### Maxim Boguk's formula
 
@@ -97,7 +97,7 @@ Cons:
 pg_index_pilot works on both self-hosted and managed PostgreSQL services:
 
 ### Universal Mode (Default)
-- PostgreSQL version 12.0 or higher
+- PostgreSQL version 13.0 or higher
 - **Required permissions:** The `index_pilot` user needs `USAGE` privilege on `postgres_fdw`
 - Database owner or user with appropriate permissions  
 - `dblink` extension installed (postgres_fdw not required)

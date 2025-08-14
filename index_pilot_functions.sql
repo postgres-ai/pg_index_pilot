@@ -38,9 +38,9 @@ LANGUAGE plpgsql;
 
 DO $$
 BEGIN
-  IF current_setting('server_version_num')<'12'
+  IF current_setting('server_version_num')<'13'
   THEN
-    RAISE 'This library works only for PostgreSQL 12 or higher!';
+    RAISE 'This library works only for PostgreSQL 13 or higher!';
   ELSE
     IF NOT index_pilot._check_pg_version_bugfixed()
     THEN

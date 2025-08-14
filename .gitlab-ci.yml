@@ -38,15 +38,7 @@ variables:
       - test-results.xml
     expire_in: 1 week
 
-# Test PostgreSQL 12 (minimum supported version)
-test:pg12:
-  <<: *test_definition
-  services:
-    - postgres:12-alpine
-  tags:
-    - docker
-
-# Test PostgreSQL 13
+# Test PostgreSQL 13 (minimum supported version)
 test:pg13:
   <<: *test_definition
   services:
@@ -70,11 +62,19 @@ test:pg15:
   tags:
     - docker
 
-# Test PostgreSQL 16 (latest stable)
+# Test PostgreSQL 16
 test:pg16:
   <<: *test_definition
   services:
     - postgres:16-alpine
+  tags:
+    - docker
+
+# Test PostgreSQL 17 (latest)
+test:pg17:
+  <<: *test_definition
+  services:
+    - postgres:17-alpine
   tags:
     - docker
 

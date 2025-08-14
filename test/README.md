@@ -21,7 +21,7 @@ This directory contains the automated test suite for pg_index_pilot. The tests a
 ## Running Tests Locally
 
 ### Prerequisites
-- PostgreSQL 12 or higher
+- PostgreSQL 13 or higher
 - psql client
 - Bash shell
 
@@ -64,7 +64,7 @@ export DB_PASS=mypass
 
 ### GitLab CI
 The project includes `.gitlab-ci.yml` which:
-- Tests against PostgreSQL versions 12, 13, 14, 15, and 16
+- Tests against PostgreSQL versions 13, 14, 15, 16, and 17
 - Runs security scans for hardcoded passwords and SQL injection
 - Tests non-superuser mode (simulating managed services)
 - Generates JUnit reports for test visualization

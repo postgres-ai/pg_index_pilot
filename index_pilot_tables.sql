@@ -2,9 +2,9 @@
 
 DO $$
 BEGIN
-  IF (SELECT setting FROM pg_settings WHERE name='server_version_num')<'12'
+  IF (SELECT setting FROM pg_settings WHERE name='server_version_num')<'13'
   THEN
-    RAISE 'This library works only for PostgreSQL 12 or higher!';
+    RAISE 'This library works only for PostgreSQL 13 or higher!';
   END IF;
 END; $$;
 
