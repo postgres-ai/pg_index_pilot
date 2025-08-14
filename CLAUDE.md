@@ -12,7 +12,9 @@ pg_index_pilot is an autonomous index lifecycle management tool for PostgreSQL t
 - Requires PostgreSQL 13+ and postgres_fdw for secure operation
 
 ## Important Rules
-Please honor the rules defined in `.cursorrules` file when working on this codebase.
+Please honor the rules defined in `.cursor/rules/` directory when working on this codebase, especially:
+- `.cursor/rules/index-pilot-rules.md` - Project-specific guidelines
+- `.cursor/rules/sql-style-guide.mdc` - SQL coding standards
 
 ## Key Technical Decisions
 
