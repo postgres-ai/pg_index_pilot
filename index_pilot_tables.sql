@@ -25,10 +25,10 @@ create table index_pilot.reindex_history
   indexrelname name not null,
   server_version_num integer not null default current_setting('server_version_num')::integer,
   indexsize_before bigint not null,
-  indexsize_after bigint not null,
+  indexsize_after bigint,  -- NULL while reindex is in progress
   estimated_tuples bigint not null,
-  reindex_duration interval not null,
-  analyze_duration interval not null
+  reindex_duration interval,  -- NULL while reindex is in progress
+  analyze_duration interval  -- NULL while reindex is in progress
 );
 create index reindex_history_oid_index on index_pilot.reindex_history(datid, indexrelid);
 create index reindex_history_index on index_pilot.reindex_history(datname, schemaname, relname, indexrelname);

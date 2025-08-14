@@ -115,33 +115,23 @@ pg_index_pilot works on both self-hosted and managed PostgreSQL services:
 
 ```bash
 # Clone the repository
-git clone https://github.com/dataegret/pg_index_pilot
+git clone https://gitlab.com/postgres-ai/pg_index_pilot
 cd pg_index_pilot
 
-# 1. Setup the index_pilot user (as admin user)
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database -f setup_01_user.psql
+# 1. Install schema and functions (as admin user)
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database -f index_pilot_tables.sql
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database -f index_pilot_functions.sql
 
-# 2. Grant additional permissions if needed (managed services only)
-# For RDS/Cloud SQL, you may need:
-# psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database \
-#   -c "GRANT EXECUTE ON FUNCTION dblink_connect_u(text,text) TO index_pilot;"
-
-# 3. Install the system (as index_pilot user)  
-export PGPASSWORD='your_secure_password'
-psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_database -f setup_02_tooling.psql
-
-# 4. Configure secure FDW connection (as index_pilot user)
-psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_database \
+# 2. Configure secure FDW connection (as admin user)
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database \
   -c "SELECT index_pilot.setup_fdw_self_connection('your-hostname', 5432, 'your_database');"
-psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_database \
-  -c "SELECT index_pilot.setup_user_mapping('index_pilot', 'your_secure_password');"
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database \
+  -c "SELECT index_pilot.setup_user_mapping('postgres', 'your_password');"
 
-# 5. Create additional USER MAPPING (required for RDS/Cloud SQL)
-# For RDS/Cloud SQL, admin users need mapping:
+# 3. Create additional USER MAPPING for RDS/Cloud SQL admin users
+# For RDS, also map rds_superuser:
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database \
-  -c "CREATE USER MAPPING IF NOT EXISTS FOR postgres SERVER index_pilot_self OPTIONS (user 'index_pilot', password 'your_secure_password');"
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database \
-  -c "CREATE USER MAPPING IF NOT EXISTS FOR rds_superuser SERVER index_pilot_self OPTIONS (user 'index_pilot', password 'your_secure_password');"
+  -c "SELECT index_pilot.setup_user_mapping('rds_superuser', 'your_password');"
 ```
 
 For additional troubleshooting, run `test_installation.psql` after installation.
@@ -150,21 +140,18 @@ For additional troubleshooting, run `test_installation.psql` after installation.
 
 ```bash
 # Clone the repository
-git clone https://github.com/dataegret/pg_index_pilot
+git clone https://gitlab.com/postgres-ai/pg_index_pilot
 cd pg_index_pilot
 
-# 1. Setup the index_pilot user (as superuser)
-psql -U postgres -d your_database -f setup_01_user.psql
+# 1. Install schema and functions (as superuser)
+psql -U postgres -d your_database -f index_pilot_tables.sql
+psql -U postgres -d your_database -f index_pilot_functions.sql
 
-# 2. Install the system (as index_pilot user)  
-export PGPASSWORD='your_secure_password'
-psql -U index_pilot -d your_database -f setup_02_tooling.psql
-
-# 3. Configure secure FDW connection (as index_pilot user)
-psql -U index_pilot -d your_database \
+# 2. Configure secure FDW connection (as superuser)
+psql -U postgres -d your_database \
   -c "SELECT index_pilot.setup_fdw_self_connection('localhost', 5432, 'your_database');"
-psql -U index_pilot -d your_database \
-  -c "SELECT index_pilot.setup_user_mapping('index_pilot', 'your_secure_password');"
+psql -U postgres -d your_database \
+  -c "SELECT index_pilot.setup_user_mapping('postgres', '');"  # Empty password for local socket connection
 ```
 
 ## Initial launch
@@ -218,6 +205,32 @@ Add to crontab:
 - Avoid overlapping with backup or other IO-intensive operations
 - Consider hourly runs for high-write workloads
 - Monitor resource usage during initial runs (first of all, both disk IO and CPU usage)
+
+## Uninstalling pg_index_pilot
+
+To completely remove pg_index_pilot from your database:
+
+```bash
+# Uninstall the tool (this will delete all collected statistics!)
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database -f uninstall.sql
+
+# Check for any leftover invalid indexes from failed reindexes
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database \
+  -c "select format('drop index concurrently if exists %I.%I;', n.nspname, i.relname) 
+      from pg_index idx
+      join pg_class i on i.oid = idx.indexrelid
+      join pg_namespace n on n.oid = i.relnamespace
+      where i.relname ~ '_ccnew[0-9]*$'
+      and not idx.indisvalid;"
+
+# Run any drop index commands from the previous query manually
+```
+
+**Note:** The uninstall script will:
+- Remove the `index_pilot` schema and all its objects
+- Remove the FDW server configuration
+- List any invalid `_ccnew*` indexes that need manual cleanup
+- Preserve the `postgres_fdw` extension (may be used by other tools)
 
 ## Updating pg_index_pilot
 
