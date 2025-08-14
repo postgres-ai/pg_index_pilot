@@ -61,7 +61,7 @@ END; $$;
 
 
 CREATE EXTENSION IF NOT EXISTS dblink;
-ALTER EXTENSION dblink UPDATE;
+-- ALTER EXTENSION dblink UPDATE;
 
 --current version of code
 CREATE OR REPLACE FUNCTION index_watch.version()
@@ -201,33 +201,43 @@ $BODY$
 LANGUAGE plpgsql;
 
 
--- set dblink connection if not exists
-CREATE OR REPLACE FUNCTION index_watch._dblink_connect_if_not(_datname NAME) RETURNS VOID AS
+-- set dblink connection for current database using FDW approach
+-- Secure connection using ONLY postgres_fdw USER MAPPING (secure approach)
+create or replace function index_watch._connect_securely(_datname name) returns void as
 $BODY$
-BEGIN
-    -- Check if we have superuser privileges
-    IF current_setting('is_superuser') = 'on' THEN
-        -- Superuser mode: connect to any database
-        IF _datname = ANY(dblink_get_connections()) IS NOT TRUE THEN
-            PERFORM dblink_connect(_datname, 'port='||current_setting('port')||$$ dbname='$$||_datname||$$'$$);
-        END IF;
-    ELSE
-        -- Non-superuser mode: only connect to current database
-        IF _datname = current_database() THEN
-            IF _datname = ANY(dblink_get_connections()) IS NOT TRUE THEN
-                -- For current database, create a loopback connection
-                -- This assumes PGPASSWORD env var or .pgpass file is configured
-                PERFORM dblink_connect(_datname, format('dbname=%L', _datname));
-            END IF;
-        ELSE
-            -- Non-superuser cannot access other databases
-            RAISE EXCEPTION 'Cannot access database % without superuser privileges', _datname;
-        END IF;
-    END IF;
-    RETURN;
-END;
+begin
+    -- Only allow connection to current database (managed services compatible mode)
+    if _datname != current_database() then
+        raise exception 'Only current database % is supported. Cannot access database %', current_database(), _datname;
+    end if;
+    
+    -- Disconnect existing connection if any
+    if _datname = any(dblink_get_connections()) then
+        perform dblink_disconnect(_datname);
+    end if;
+    
+    -- Use ONLY postgres_fdw with USER MAPPING (secure approach)
+    -- Password is stored securely in PostgreSQL catalog, not in plain text
+    begin
+        perform dblink_connect_u(_datname, 'index_pilot_self');
+    exception when others then
+        raise exception 'FDW connection failed. Please setup postgres_fdw USER MAPPING using setup_rds_connection(): %', sqlerrm;
+    end;
+end;
 $BODY$
-LANGUAGE plpgsql;
+language plpgsql;
+
+create or replace function index_watch._dblink_connect_if_not(_datname name) returns void as
+$BODY$
+begin
+    -- Use secure FDW connection if not already connected
+    if _datname = any(dblink_get_connections()) is not true then
+        perform index_watch._connect_securely(_datname);
+    end if;
+    return;
+end;
+$BODY$
+language plpgsql;
 
 
 
@@ -241,6 +251,9 @@ BEGIN
     IF index_watch._check_pg_version_bugfixed() THEN _use_toast_tables := 'True';
     ELSE _use_toast_tables := 'False';
     END IF;
+    -- Secure FDW connection for querying indexes
+    PERFORM index_watch._connect_securely(_datname);
+    
     RETURN QUERY SELECT
       _datname, _res.schemaname, _res.relname, _res.indexrelname, _res.indexrelid
     FROM
@@ -544,6 +557,9 @@ BEGIN
     IF index_watch._check_pg_version_bugfixed() THEN _use_toast_tables := 'True';
     ELSE _use_toast_tables := 'False';
     END IF;
+    -- Secure FDW connection for querying index info
+    PERFORM index_watch._connect_securely(_datname);
+    
     RETURN QUERY SELECT
       d.oid as datid, _res.indexrelid, _datname, _res.schemaname, _res.relname, _res.indexrelname, _res.indisvalid, _res.indexsize
       -- zero tuples clamp up 1 tuple (or bloat estimates will be infinity with all division by zero fun in multiple places)
@@ -619,6 +635,9 @@ $BODY$
 DECLARE
   index_info RECORD;
 BEGIN
+  -- Establish dblink connection for managed services mode
+  PERFORM index_watch._dblink_connect_if_not(_datname);
+  
   --merge index data fetched from the database and index_current_state
   --now keep info about all potentially interesting indexes (even small ones)
   --we can do it now because we keep exactly one entry in index_current_state per index (without history)
@@ -772,12 +791,19 @@ DECLARE
   _datid OID;
   _indisvalid BOOLEAN;
 BEGIN
+  -- Establish secure dblink connection via FDW (always recreate for reliability)
+  BEGIN
+    PERFORM index_watch._connect_securely(_datname);
+    RAISE NOTICE 'Created secure FDW connection: %', _datname;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'Failed to create secure FDW connection "%": %', _datname, SQLERRM;
+  END;
 
   --RAISE NOTICE 'working with %.%.% %', _datname, _schemaname, _relname, _indexrelname;
 
   --get initial actual index size and verify that the index indeed exists in the target database
   --PS: english articles are driving me mad periodically
-  SELECT indexsize INTO _indexsize_before
+  SELECT indexsize, estimated_tuples INTO _indexsize_before, _estimated_tuples
   FROM index_watch._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
   WHERE indisvalid IS TRUE;
   --index doesn't exist anymore
@@ -785,57 +811,44 @@ BEGIN
     RETURN;
   END IF;
 
-  --perform reindex index
+  --perform reindex index using async dblink
   _timestamp := pg_catalog.clock_timestamp ();
-  PERFORM dblink(_datname, 'REINDEX INDEX CONCURRENTLY '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_indexrelname));
-  _reindex_duration := pg_catalog.clock_timestamp ()-_timestamp;
-
-  --analyze
-  --skip analyze for toast tables
-  IF (_schemaname != 'pg_toast') THEN
-    _timestamp := clock_timestamp ();
-    PERFORM dblink(_datname, 'ANALYZE '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_relname));
-     _analyze_duration := pg_catalog.clock_timestamp ()-_timestamp;
+  
+  -- Simple async REINDEX CONCURRENTLY (fire-and-forget)
+  IF dblink_send_query(_datname, 'REINDEX INDEX CONCURRENTLY '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_indexrelname)) = 1 THEN
+    RAISE NOTICE 'REINDEX CONCURRENTLY %I.%I started successfully (async)', _schemaname, _indexrelname;
+    
+    -- Simple check - is it still busy immediately?
+    IF dblink_is_busy(_datname) = 1 THEN
+      RAISE NOTICE 'REINDEX %I.%I is running in background', _schemaname, _indexrelname;
+    ELSE
+      -- Quick completion, get result
+      PERFORM dblink_get_result(_datname);
+      RAISE NOTICE 'REINDEX CONCURRENTLY %I.%I completed quickly', _schemaname, _indexrelname;
+    END IF;
+  ELSE
+    RAISE NOTICE 'Failed to send async REINDEX for %I.%I - please execute manually: REINDEX INDEX CONCURRENTLY %I.%I;', _schemaname, _indexrelname, _schemaname, _indexrelname;
   END IF;
 
-  --get final index size
-  SELECT datid, indexrelid, indisvalid, indexsize, estimated_tuples INTO STRICT _datid, _indexrelid, _indisvalid, _indexsize_after, _estimated_tuples
-  FROM index_watch._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname);
+  _reindex_duration := pg_catalog.clock_timestamp ()-_timestamp;
 
-  --log reindex action
-  INSERT INTO index_watch.reindex_history
-  (datid, indexrelid, datname, schemaname, relname, indexrelname, indexsize_before, indexsize_after, estimated_tuples, reindex_duration, analyze_duration)
-  VALUES
-  (_datid, _indexrelid, _datname, _schemaname, _relname, _indexrelname, _indexsize_before, _indexsize_after, _estimated_tuples, _reindex_duration, _analyze_duration);
-
-  --update current_state... insert action here not possible in normal course of action
-  --but better keep it as possible option in case of someone decide to call _reindex_index directly
-  --todo: do something with ugly code duplication in index_watch._reindex_index and index_watch._record_indexes_info
-  INSERT INTO index_watch.index_current_state AS i
-  (datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples, best_ratio)
-  VALUES (_datid, _indexrelid, _datname, _schemaname, _relname, _indexrelname, _indisvalid, _indexsize_after, _estimated_tuples,
-    CASE
-    WHEN _indexsize_after < pg_size_bytes(index_watch.get_setting(_datname, _schemaname, _relname, _indexrelname, 'minimum_reliable_index_size'))
-    --if index size after reindex are too small (less than minimum_reliable_index_size) we cannot use it to estimate best_ratio
-    THEN NULL
-    ELSE _indexsize_after::real/_estimated_tuples::real
-    END
-  )
-  ON CONFLICT (datid, indexrelid)
-  DO UPDATE SET
-    mtime=now(),
-    indisvalid=EXCLUDED.indisvalid,
-    indexsize=EXCLUDED.indexsize,
-    estimated_tuples=EXCLUDED.estimated_tuples,
-    best_ratio=
-      --if the new index size less than minimum_reliable_index_size - we cannot use it's size and tuples as reliable gauge for the best_ratio
-      --so keep old best_ratio value instead as best guess
-      CASE WHEN (EXCLUDED.indexsize < pg_size_bytes(index_watch.get_setting(EXCLUDED.datname, EXCLUDED.schemaname, EXCLUDED.relname, EXCLUDED.indexrelname, 'minimum_reliable_index_size')))
-      THEN i.best_ratio
-      -- else set new best_value uncoditionally
-      ELSE EXCLUDED.indexsize::real/EXCLUDED.estimated_tuples::real
-      END;
-  RETURN;
+  -- Fire-and-forget mode: REINDEX is running asynchronously
+  -- Log the start of reindex operation immediately
+  INSERT INTO index_watch.reindex_history (
+    datname, schemaname, relname, indexrelname,
+    indexsize_before, indexsize_after, estimated_tuples, reindex_duration, analyze_duration,
+    entry_timestamp
+  ) VALUES (
+    _datname, _schemaname, _relname, _indexrelname,
+    _indexsize_before, _indexsize_before, _estimated_tuples, '0'::interval, '0'::interval,  -- Placeholder values
+    now()
+  );
+  
+  RAISE NOTICE 'REINDEX STARTED: %I.%I (fire-and-forget mode) - size before: %s', 
+    _schemaname, _indexrelname, pg_size_pretty(_indexsize_before);
+  
+  -- The actual reindex completion and final size will be detected by periodic monitoring
+  -- when it runs next time and compares current vs recorded sizes
 END;
 $BODY$
 LANGUAGE plpgsql STRICT;
@@ -893,16 +906,15 @@ BEGIN
           _index.relname,
           _index.indexrelname
        );
-       COMMIT;
+       
        PERFORM index_watch._reindex_index(_index.datname, _index.schemaname, _index.relname, _index.indexrelname);
-       COMMIT;
+       
        DELETE FROM index_watch.current_processed_index
        WHERE
           datname=_index.datname AND
           schemaname=_index.schemaname AND
           relname=_index.relname AND
           indexrelname=_index.indexrelname;
-       COMMIT;
     END LOOP;
   RETURN;
 END;
@@ -998,7 +1010,7 @@ BEGIN
           schemaname=_index.schemaname AND
           relname=_index.relname AND
           indexrelname=_index.indexrelname;
-       COMMIT;
+
   END LOOP;
 END;
 $BODY$
@@ -1009,12 +1021,11 @@ DROP PROCEDURE IF EXISTS index_watch.periodic(BOOLEAN);
 CREATE OR REPLACE PROCEDURE index_watch.periodic(real_run BOOLEAN DEFAULT FALSE, force BOOLEAN DEFAULT FALSE) AS
 $BODY$
 DECLARE
-  _datname NAME;
-  _schemaname NAME;
-  _relname NAME;
-  _indexrelname NAME;
+  _datname name;
+  _schemaname name;
+  _relname name;
+  _indexrelname name;
   _id bigint;
-  _is_superuser BOOLEAN;
 BEGIN
     IF NOT index_watch._check_pg14_version_bugfixed()
       THEN
@@ -1033,130 +1044,385 @@ BEGIN
 
     SELECT index_watch._check_lock() INTO _id;
     PERFORM index_watch.check_update_structure_version();
-    COMMIT;
 
-    -- Check if we have superuser privileges
-    _is_superuser := current_setting('is_superuser') = 'on';
-
-    IF _is_superuser THEN
-        -- Superuser mode: process all databases
-        PERFORM index_watch._cleanup_old_records();
-        COMMIT;
-        CALL index_watch._cleanup_our_not_valid_indexes();
-        COMMIT;
-
-        FOR _datname IN
-          SELECT datname FROM pg_database
-          WHERE
-            NOT datistemplate
-            AND datallowconn
-            AND datname<>current_database()
-            AND index_watch.get_setting(datname, NULL, NULL, NULL, 'skip')::boolean IS DISTINCT FROM TRUE
-          ORDER BY datname
-        LOOP
-          PERFORM index_watch._dblink_connect_if_not(_datname);
-          --update current state of ALL indexes in target database
-          PERFORM index_watch._record_indexes_info(_datname, NULL, NULL, NULL);
-          COMMIT;
-          --if real_run isn't set - do nothing else
-          IF (real_run) THEN
-            CALL index_watch.do_reindex(_datname, NULL, NULL, NULL, force);
-            COMMIT;
-          END IF;
-          PERFORM dblink_disconnect(_datname);
-        END LOOP;
-    ELSE
-        -- Non-superuser mode: process only current database
-        DELETE FROM index_watch.reindex_history
-        WHERE datname = current_database()
-        AND entry_timestamp < now() - COALESCE(
+    -- Managed services mode: process only current database
+    delete from index_watch.reindex_history
+    where datname = current_database()
+    and entry_timestamp < now() - coalesce(
             index_watch.get_setting(datname, schemaname, relname, indexrelname, 'reindex_history_retention_period')::interval,
             '10 years'::interval
         );
-        COMMIT;
 
-        -- Process only current database
-        PERFORM index_watch._record_indexes_info(current_database(), NULL, NULL, NULL);
-        COMMIT;
+    -- Process current database
+    perform index_watch._record_indexes_info(current_database(), null, null, null);
 
-        IF real_run THEN
-            CALL index_watch.do_reindex(current_database(), NULL, NULL, NULL, force);
-            COMMIT;
-        END IF;
-    END IF;
+    if real_run then
+        call index_watch.do_reindex(current_database(), null, null, null, force);
+    end if;
+
+    -- Complete reindex history records for fire-and-forget operations
+    -- Update size_after and reindex_duration for records that have placeholder values
+    UPDATE index_watch.reindex_history 
+    SET 
+        indexsize_after = (
+            SELECT indexsize 
+            FROM index_watch._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
+            WHERE indisvalid IS TRUE
+        ),
+        reindex_duration = now() - entry_timestamp
+    WHERE 
+        datname = current_database()
+        AND indexsize_after = indexsize_before  -- Placeholder values
+        AND entry_timestamp > now() - interval '1 hour'  -- Recent records only
+        AND EXISTS (
+            SELECT 1 
+            FROM index_watch._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
+            WHERE indisvalid IS TRUE
+        );
 
     PERFORM pg_advisory_unlock(_id);
 END;
 $BODY$
 LANGUAGE plpgsql;
 
--- Add a simple permission check function for non-superuser mode
-CREATE OR REPLACE FUNCTION index_watch.check_permissions()
-RETURNS TABLE(permission text, status boolean) AS
+-- Permission check function for managed services mode
+create or replace function index_watch.check_permissions()
+returns table(permission text, status boolean) as
 $BODY$
-BEGIN
-    RETURN QUERY
-    SELECT 'Can create indexes'::text,
+begin
+    return query
+    select 'Can create indexes'::text,
            has_database_privilege(current_database(), 'CREATE');
 
-    RETURN QUERY
-    SELECT 'Can read pg_stat_user_indexes'::text,
+    return query
+    select 'Can read pg_stat_user_indexes'::text,
            has_table_privilege('pg_stat_user_indexes', 'SELECT');
 
-    RETURN QUERY
-    SELECT 'Has dblink extension'::text,
-           EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'dblink');
+    return query
+    select 'Has dblink extension'::text,
+           exists (select 1 from pg_extension where extname = 'dblink');
+
+    return query
+    select 'Has postgres_fdw extension'::text,
+           exists (select 1 from pg_extension where extname = 'postgres_fdw');
+
+    return query
+    select 'Has index_pilot_self server'::text,
+           exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self');
+
+    return query
+    select 'Has user mapping for dblink'::text,
+           exists (
+               select 1 from pg_user_mappings 
+               where srvname = 'index_pilot_self' 
+               and usename = current_user
+           );
 
     -- Check if we can REINDEX by trying to find at least one index we own
-    RETURN QUERY
-    SELECT 'Can REINDEX (owns indexes)'::text,
-           EXISTS (
-               SELECT 1 FROM pg_index i
-               JOIN pg_class c ON i.indexrelid = c.oid
-               JOIN pg_namespace n ON c.relnamespace = n.oid
-               WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-               AND pg_has_role(c.relowner, 'USAGE')
-               LIMIT 1
+    return query
+    select 'Can REINDEX (owns indexes)'::text,
+           exists (
+           select 1 from pg_index i
+               join pg_class c on i.indexrelid = c.oid
+               join pg_namespace n on c.relnamespace = n.oid
+               where n.nspname not in ('pg_catalog', 'information_schema')
+               and pg_has_role(c.relowner, 'USAGE')
+               limit 1
            );
+end;
+$BODY$
+language plpgsql;
+
+-- At installation, show permission status and configuration information
+do $$
+declare
+    _perm record;
+    _all_ok boolean := true;
+begin
+    raise notice 'pg_index_pilot - monitoring current database only';
+    raise notice 'Database: %', current_database();
+    raise notice '';
+    raise notice 'Checking permissions...';
+
+    for _perm in select * from index_watch.check_permissions() loop
+        raise notice '  %: %',
+                rpad(_perm.permission, 30),
+            case when _perm.status then 'OK' else 'MISSING' end;
+        if not _perm.status then
+                _all_ok := false;
+        end if;
+    end loop;
+
+    raise notice '';
+    if _all_ok then
+        raise notice 'All permissions OK. You can use pg_index_pilot.';
+    else
+        raise warning 'Some permissions are missing. pg_index_pilot may not work correctly.';
+    end if;
+
+    raise notice '';
+    raise notice 'Usage: call index_watch.periodic(true);  -- true = perform actual reindexing';
+end $$;
+
+-- Setup functions for FDW + DB-Link configuration (managed services mode)
+
+-- Function to setup foreign server for self-connection
+create or replace function index_watch.setup_fdw_self_connection(
+    _host text default 'localhost',
+    _port integer default null,
+    _dbname text default null
+) returns text as
+$BODY$
+declare
+    _actual_port integer;
+    _actual_dbname text;
+    _result text;
+begin
+    -- Use current connection parameters if not provided
+    _actual_port := coalesce(_port, current_setting('port')::integer);
+    _actual_dbname := coalesce(_dbname, current_database());
+    
+    -- Create foreign server if it doesn't exist
+    if not exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self') then
+        execute format('create server index_pilot_self foreign data wrapper postgres_fdw options (host %L, port %L, dbname %L)', 
+                       _host, _actual_port::text, _actual_dbname);
+        _result := 'Created foreign server index_pilot_self';
+    else
+        _result := 'Foreign server index_pilot_self already exists';
+    end if;
+    
+    return _result;
+end;
+$BODY$
+language plpgsql;
+
+-- Function to setup user mapping for index_pilot user
+create or replace function index_watch.setup_user_mapping(
+    _username text default null,
+    _password text default null
+) returns text as
+$BODY$
+declare
+    _actual_username text;
+    _result text;
+begin
+    -- Use current user if not provided
+    _actual_username := coalesce(_username, current_user);
+    
+    -- Check if foreign server exists
+    if not exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self') then
+        raise exception 'Foreign server index_pilot_self does not exist. Run setup_fdw_self_connection() first.';
+    end if;
+    
+    -- Create or update user mapping
+    if exists (
+        select 1 from pg_user_mappings 
+        where srvname = 'index_pilot_self' 
+        and usename = _actual_username
+    ) then
+        if _password is not null then
+            execute format('alter user mapping for %I server index_pilot_self options (set password %L)', 
+                           _actual_username, _password);
+            _result := format('Updated user mapping for %s', _actual_username);
+        else
+            _result := format('User mapping for %s already exists', _actual_username);
+        end if;
+    else
+        if _password is null then
+            raise exception 'Password is required for new user mapping';
+        end if;
+        
+        execute format('create user mapping for %I server index_pilot_self options (user %L, password %L)', 
+                       _actual_username, _actual_username, _password);
+        _result := format('Created user mapping for %s', _actual_username);
+    end if;
+    
+    return _result;
+end;
+$BODY$
+language plpgsql;
+
+-- Check postgres_fdw setup status and permissions  
+create or replace function index_watch.check_fdw_security_status() 
+returns table(component text, status text, details text) as
+$BODY$
+begin
+    -- Check postgres_fdw extension
+    return query select 
+        'postgres_fdw extension'::text,
+        case when exists (select 1 from pg_extension where extname = 'postgres_fdw') 
+             then 'INSTALLED' else 'MISSING' end::text,
+        case when exists (select 1 from pg_extension where extname = 'postgres_fdw')
+             then 'postgres_fdw extension is available'
+             else 'Run: CREATE EXTENSION postgres_fdw;' end::text;
+
+    -- Check FDW usage privilege
+    return query select 
+        'FDW usage privilege'::text,
+        case when has_foreign_data_wrapper_privilege(current_user, 'postgres_fdw', 'USAGE')
+             then 'GRANTED' else 'DENIED' end::text,
+        case when has_foreign_data_wrapper_privilege(current_user, 'postgres_fdw', 'USAGE')
+             then format('User %s can use postgres_fdw', current_user)
+             else format('REQUIRED: GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO %s;', current_user) end::text;
+             
+    -- Check foreign server
+    return query select 
+        'Foreign server'::text,
+        case when exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self')
+             then 'EXISTS' else 'MISSING' end::text,
+        case when exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self')
+             then 'index_pilot_self server configured'
+             else 'Run setup_rds_connection() to create' end::text;
+             
+    -- Check user mapping
+    return query select 
+        'User mapping'::text,
+        case when exists (select 1 from pg_user_mappings where srvname = 'index_pilot_self' and usename = current_user)
+             then 'EXISTS' else 'MISSING' end::text,
+        case when exists (select 1 from pg_user_mappings where srvname = 'index_pilot_self' and usename = current_user)
+             then format('Secure password mapping exists for %s', current_user)
+             else 'Run setup_rds_connection() to create' end::text;
+             
+    -- Overall security status
+    return query select 
+        'Security compliance'::text,
+        case when has_foreign_data_wrapper_privilege(current_user, 'postgres_fdw', 'USAGE')
+                  and exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self')
+                  and exists (select 1 from pg_user_mappings where srvname = 'index_pilot_self' and usename = current_user)
+             then 'SECURE' else 'SETUP_REQUIRED' end::text,
+        case when has_foreign_data_wrapper_privilege(current_user, 'postgres_fdw', 'USAGE')
+                  and exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self')
+                  and exists (select 1 from pg_user_mappings where srvname = 'index_pilot_self' and usename = current_user)
+             then 'Secure implementation: ONLY postgres_fdw USER MAPPING (no plain text passwords)'
+             else 'Complete setup_rds_connection() for secure operation' end::text;
+end;
+$BODY$
+language plpgsql;
+
+-- Setup secure connection using postgres_fdw USER MAPPING ONLY
+-- Secure approach: password provided once via CREATE USER MAPPING
+CREATE OR REPLACE FUNCTION index_watch.setup_rds_connection(_host text, _port integer DEFAULT 5432, _username text DEFAULT 'index_pilot', _password text DEFAULT NULL)
+RETURNS text
+AS
+$BODY$
+DECLARE
+    _setup_result text;
+    _has_fdw_usage boolean;
+BEGIN
+    -- Check if user has USAGE privilege on postgres_fdw
+    SELECT has_foreign_data_wrapper_privilege(current_user, 'postgres_fdw', 'USAGE') INTO _has_fdw_usage;
+    
+    IF NOT _has_fdw_usage THEN
+        RAISE EXCEPTION 'ERROR: User % does not have USAGE privilege on postgres_fdw.
+
+REQUIRED SETUP:
+1. Connect as database owner or admin user:
+   psql -h % -U <admin_user> -d %
+
+2. Grant FDW usage to index_pilot:
+   GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO %;
+
+3. Then retry this function.
+
+NOTE: This follows security best practices to use ONLY postgres_fdw USER MAPPING (no plain text passwords).', 
+                current_user, _host, current_database(), current_user;
+    END IF;
+    
+    -- Password is required for secure USER MAPPING
+    IF _password IS NULL THEN
+        RAISE EXCEPTION 'Password is required for secure postgres_fdw USER MAPPING setup';
+    END IF;
+    
+    -- Setup FDW foreign server
+    SELECT index_watch.setup_fdw_self_connection(_host, _port, null) INTO _setup_result;
+    
+    -- Setup USER MAPPING with password (stored securely in PostgreSQL catalog)
+    SELECT index_watch.setup_user_mapping(_username, _password) INTO _setup_result;
+    
+    -- Test the secure FDW connection
+    BEGIN
+        PERFORM dblink_connect_u('test_fdw', 'index_pilot_self');
+        PERFORM dblink_disconnect('test_fdw');
+        RETURN format('SUCCESS: Secure postgres_fdw USER MAPPING configured for %s@%s:%s (password stored in PostgreSQL catalog)', _username, _host, _port);
+    EXCEPTION WHEN OTHERS THEN
+        RAISE EXCEPTION 'FDW connection test failed: %', SQLERRM;
+    END;
 END;
 $BODY$
 LANGUAGE plpgsql;
 
--- At installation, show permission status and mode information
-DO $$
-DECLARE
-    _perm record;
-    _all_ok boolean := true;
-    _is_superuser boolean;
-BEGIN
-    _is_superuser := current_setting('is_superuser') = 'on';
+-- Convenience function to setup complete FDW configuration
+create or replace function index_watch.setup_fdw_complete(
+    _password text,
+    _host text default 'localhost',
+    _port integer default null,
+    _username text default null
+) returns table(step text, result text) as
+$BODY$
+declare
+    _setup_result text;
+begin
+    -- Step 1: Setup foreign server
+    select index_watch.setup_fdw_self_connection(_host, _port, null) into _setup_result;
+    return query select 'Foreign Server'::text, _setup_result;
+    
+    -- Step 2: Setup user mapping
+    select index_watch.setup_user_mapping(_username, _password) into _setup_result;
+    return query select 'User Mapping'::text, _setup_result;
+    
+    -- Step 3: Setup connection parameters
+    select index_watch.setup_rds_connection(_host, _port, coalesce(_username, 'index_pilot'), _password) into _setup_result;
+    return query select 'Connection Setup'::text, _setup_result;
+    
+    -- Step 4: Test connection
+    begin
+        perform dblink_connect_u('test_connection', 'index_pilot_self');
+        perform dblink_disconnect('test_connection');
+        return query select 'Connection Test'::text, 'SUCCESS - dblink can connect via FDW'::text;
+    exception when others then
+        return query select 'Connection Test'::text, format('FAILED - %s', sqlerrm)::text;
+    end;
+end;
+$BODY$
+language plpgsql;
 
-    IF _is_superuser THEN
-        RAISE NOTICE 'pg_index_pilot is running in SUPERUSER mode - all databases will be monitored';
-    ELSE
-        RAISE NOTICE 'pg_index_pilot is running in NON-SUPERUSER mode - only current database will be monitored';
-        RAISE NOTICE '';
-        RAISE NOTICE 'Checking permissions...';
-
-        FOR _perm IN SELECT * FROM index_watch.check_permissions() LOOP
-            RAISE NOTICE '  %: %',
-                rpad(_perm.permission, 30),
-                CASE WHEN _perm.status THEN 'OK' ELSE 'MISSING' END;
-            IF NOT _perm.status THEN
-                _all_ok := false;
-            END IF;
-        END LOOP;
-
-        RAISE NOTICE '';
-        IF _all_ok THEN
-            RAISE NOTICE 'All permissions OK. You can use pg_index_pilot.';
-        ELSE
-            RAISE WARNING 'Some permissions are missing. pg_index_pilot may not work correctly.';
-        END IF;
-    END IF;
-
-    RAISE NOTICE '';
-    RAISE NOTICE 'Usage: CALL index_watch.periodic(true);  -- true = perform actual reindexing';
-END $$;
+-- Function to check FDW configuration status
+create or replace function index_watch.check_fdw_status()
+returns table(component text, status text, details text) as
+$BODY$
+begin
+    -- Check postgres_fdw extension
+    return query
+    select 'postgres_fdw extension'::text,
+           case when exists (select 1 from pg_extension where extname = 'postgres_fdw') 
+                then 'OK' else 'MISSING' end::text,
+           case when exists (select 1 from pg_extension where extname = 'postgres_fdw') 
+                then 'Extension is installed' 
+                else 'Run: CREATE EXTENSION postgres_fdw;' end::text;
+    
+    -- Check foreign server
+    return query
+    select 'Foreign server'::text,
+           case when exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self') 
+                then 'OK' else 'MISSING' end::text,
+           case when exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self') 
+                then 'Server index_pilot_self exists'
+                else 'Run: SELECT index_watch.setup_fdw_self_connection();' end::text;
+    
+    -- Check user mapping
+    return query
+    select 'User mapping'::text,
+           case when exists (
+               select 1 from pg_user_mappings 
+               where srvname = 'index_pilot_self' and usename = current_user
+           ) then 'OK' else 'MISSING' end::text,
+           case when exists (
+               select 1 from pg_user_mappings 
+               where srvname = 'index_pilot_self' and usename = current_user
+           ) then format('Mapping exists for user %s', current_user)
+           else format('Run: SELECT index_watch.setup_user_mapping(''%s'', ''your_password'');', current_user) end::text;
+end;
+$BODY$
+language plpgsql;
 
 

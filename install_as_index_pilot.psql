@@ -1,0 +1,119 @@
+-- Installation script for pg_index_pilot
+-- This script should be run as the index_pilot user after setup_index_pilot_user.sql
+
+\set ON_ERROR_STOP
+
+-- Verify we're running as index_pilot user
+do $$
+begin
+    if current_user != 'index_pilot' then
+        raise exception 'This script must be run as the index_pilot user. Current user: %', current_user;
+    end if;
+end $$;
+
+-- Check PostgreSQL version
+do $$
+begin
+    if (select setting from pg_settings where name='server_version_num') < '12'
+    then
+        raise exception 'pg_index_pilot works only with PostgreSQL 12 or higher';
+    end if;
+    
+    raise notice 'PostgreSQL version: %', current_setting('server_version');
+end; $$;
+
+-- Verify required extensions are available
+do $$
+begin
+    if not exists (select 1 from pg_extension where extname = 'dblink') then
+        raise exception 'dblink extension is not installed'
+            using hint = 'Install it first: CREATE EXTENSION dblink;';
+    end if;
+    
+    if not exists (select 1 from pg_extension where extname = 'postgres_fdw') then
+        raise exception 'postgres_fdw extension is not installed'
+            using hint = 'Install it first: CREATE EXTENSION postgres_fdw;';
+    end if;
+end $$;
+
+-- Install table structures
+\echo 'Installing table structures...'
+\i index_watch_tables.sql
+
+-- Install functions and procedures  
+\echo 'Installing functions and procedures...'
+\i index_watch_functions.sql
+
+-- Verify installation
+\echo 'Verifying installation...'
+
+-- Check version
+select 'Version: ' || index_watch.version() as installation_info;
+
+-- Check permissions
+\echo 'Checking permissions...'
+select * from index_watch.check_permissions();
+
+-- Check FDW status
+\echo 'Checking FDW configuration status...'
+select * from index_watch.check_fdw_status();
+
+-- Final verification
+do $$
+declare
+    _perm record;
+    _fdw record;
+    _missing_permissions boolean := false;
+    _missing_fdw boolean := false;
+begin
+    raise notice '';
+    raise notice '=== Installation Verification ===';
+    
+    -- Check permissions
+    for _perm in select * from index_watch.check_permissions() loop
+        if not _perm.status then
+            _missing_permissions := true;
+            raise warning 'Missing permission: %', _perm.permission;
+        end if;
+    end loop;
+    
+    -- Check FDW configuration
+    for _fdw in select * from index_watch.check_fdw_status() loop
+        if _fdw.status != 'OK' then
+            _missing_fdw := true;
+            raise warning 'FDW issue: % - %', _fdw.component, _fdw.details;
+        end if;
+    end loop;
+    
+    raise notice '';
+    
+    if _missing_permissions then
+        raise warning 'Some permissions are missing. pg_index_pilot may not work correctly.';
+        raise notice 'Review the setup_index_pilot_user.sql script and ensure it was run properly.';
+    else
+        raise notice 'All permissions OK.';
+    end if;
+    
+    if _missing_fdw then
+        raise warning 'FDW configuration is incomplete.';
+        raise notice 'Run: SELECT * FROM index_watch.setup_fdw_complete(''your_password'');';
+    else
+        raise notice 'FDW configuration looks good.';
+    end if;
+    
+    raise notice '';
+    
+    if not _missing_permissions and not _missing_fdw then
+        raise notice 'Installation completed successfully!';
+        raise notice '';
+        raise notice 'Usage:';
+        raise notice '  - Dry run:  CALL index_watch.periodic(false);';
+        raise notice '  - Real run: CALL index_watch.periodic(true);';
+        raise notice '';
+        raise notice 'Monitoring:';
+        raise notice '  - History: SELECT * FROM index_watch.history LIMIT 10;';
+        raise notice '  - Status:  SELECT * FROM index_watch.get_index_bloat_estimates(current_database());';
+    else
+        raise warning 'Installation completed with issues. Please review the warnings above.';
+    end if;
+end $$;
