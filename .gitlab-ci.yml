@@ -14,35 +14,37 @@ variables:
 # Test against multiple PostgreSQL versions
 .test_template: &test_definition
   stage: test
+  image: postgres:alpine
   script:
-    - apt-get update -qq && apt-get install -y postgresql-client
+    - apk add --no-cache bash
     - |
       echo "Waiting for PostgreSQL to be ready..."
       WAIT_TIME=0
-      until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1" > /dev/null 2>&1 || [ $WAIT_TIME -eq 15 ]; do
+      until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1" > /dev/null 2>&1 || [ $WAIT_TIME -eq 30 ]; do
         echo "Waiting for database... ($WAIT_TIME seconds)"
-        sleep 1
-        WAIT_TIME=$((WAIT_TIME + 1))
+        sleep 2
+        WAIT_TIME=$((WAIT_TIME + 2))
       done
-      if [ $WAIT_TIME -eq 15 ]; then
-        echo "ERROR: Database failed to start within 15 seconds"
+      if [ $WAIT_TIME -eq 30 ]; then
+        echo "ERROR: Database failed to start within 30 seconds"
         exit 1
       fi
       echo "Database ready after $WAIT_TIME seconds"
     - |
       echo "PostgreSQL version:"
-      psql -h postgres -U postgres -c "SELECT version();"
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT version();"
     - |
       echo "Running test suite..."
       cd test
-      ./run_tests.sh -h postgres -u postgres -d test_index_pilot
+      chmod +x run_tests.sh
+      ./run_tests.sh -h postgres -u postgres -w "$POSTGRES_PASSWORD" -d test_index_pilot
   allow_failure: false
   artifacts:
     reports:
-      junit: test-results.xml
+      junit: test/test-results.xml
     when: always
     paths:
-      - test-results.xml
+      - test/test-results.xml
     expire_in: 1 week
 
 # Test PostgreSQL 13 (minimum supported version)
@@ -88,27 +90,27 @@ test:pg17:
 # Test on managed service simulation (non-superuser)
 test:nonsuperuser:
   stage: test
+  image: postgres:16-alpine
   services:
     - postgres:16-alpine
   script:
-    - apt-get update -qq && apt-get install -y postgresql-client
+    - apk add --no-cache bash
     - |
       echo "Waiting for PostgreSQL to be ready..."
       WAIT_TIME=0
-      until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1" > /dev/null 2>&1 || [ $WAIT_TIME -eq 15 ]; do
+      until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1" > /dev/null 2>&1 || [ $WAIT_TIME -eq 30 ]; do
         echo "Waiting for database... ($WAIT_TIME seconds)"
-        sleep 1
-        WAIT_TIME=$((WAIT_TIME + 1))
+        sleep 2
+        WAIT_TIME=$((WAIT_TIME + 2))
       done
-      if [ $WAIT_TIME -eq 15 ]; then
-        echo "ERROR: Database failed to start within 15 seconds"
+      if [ $WAIT_TIME -eq 30 ]; then
+        echo "ERROR: Database failed to start within 30 seconds"
         exit 1
       fi
       echo "Database ready after $WAIT_TIME seconds"
     - |
       echo "Setting up non-superuser test environment..."
-      export PGPASSWORD=postgres
-      psql -h postgres -U postgres << EOF
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres << EOF
       CREATE DATABASE test_index_pilot;
       CREATE USER index_pilot WITH PASSWORD 'testpass';
       GRANT CONNECT, CREATE ON DATABASE test_index_pilot TO index_pilot;
@@ -120,12 +122,12 @@ test:nonsuperuser:
       EOF
     - |
       echo "Installing as non-superuser..."
-      export PGPASSWORD=testpass
-      psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_tables.sql
-      psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_functions.sql
+      PGPASSWORD=testpass psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_tables.sql
+      PGPASSWORD=testpass psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_functions.sql
     - |
       echo "Running non-superuser tests..."
       cd test
+      chmod +x run_tests.sh
       SKIP_INSTALL=true ./run_tests.sh -h postgres -u index_pilot -w testpass -d test_index_pilot
   tags:
     - docker
@@ -152,10 +154,9 @@ security:secrets:
 # SQL injection and security check
 security:sql:
   stage: security
-  image: postgres:16-alpine
-  services:
-    - postgres:16-alpine
+  image: alpine:latest
   script:
+    - apk add --no-cache grep
     - |
       echo "Checking for SQL injection vulnerabilities..."
       # Check for direct string concatenation in SQL
