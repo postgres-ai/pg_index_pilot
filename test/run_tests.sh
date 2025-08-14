@@ -141,10 +141,25 @@ if [ "$SKIP_INSTALL" != "true" ]; then
     
     # Setup FDW for testing - using proper connection functions (after schema is installed)
     echo "Setting up FDW connection for testing..."
-    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
-        -- Use the built-in function to setup FDW properly
-        SELECT index_pilot.setup_fdw_self_connection('$DB_HOST', $DB_PORT, '$DB_NAME');
-    " || echo "Warning: Could not setup FDW server"
+    
+    # Try different hostnames for FDW connection
+    # In CI/Docker, 'localhost' often works better than service name for loopback
+    for FDW_HOST in "$DB_HOST" "localhost" "127.0.0.1"; do
+        echo "Trying FDW setup with host: $FDW_HOST"
+        
+        # Drop existing server if any
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+            DROP SERVER IF EXISTS index_pilot_self CASCADE;
+        " 2>/dev/null || true
+        
+        # Try to setup FDW with this host
+        if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+            SELECT index_pilot.setup_fdw_self_connection('$FDW_HOST', $DB_PORT, '$DB_NAME');
+        " 2>/dev/null; then
+            echo "FDW server created with host: $FDW_HOST"
+            break
+        fi
+    done
     
     # Setup user mapping with password if provided
     if [ -n "$DB_PASS" ]; then
@@ -169,6 +184,16 @@ if [ "$SKIP_INSTALL" != "true" ]; then
         psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
             SELECT index_pilot.setup_user_mapping('$DB_USER', '');
         " || echo "Warning: Could not setup user mapping"
+    fi
+    
+    # Test FDW connection actually works
+    echo "Testing FDW connection..."
+    if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+        SELECT index_pilot._connect_securely('$DB_NAME');
+    " 2>/dev/null; then
+        echo -e "${GREEN}✓ FDW connection test successful${NC}"
+    else
+        echo -e "${YELLOW}Warning: FDW connection test failed - some tests may be skipped${NC}"
     fi
     
     echo -e "${GREEN}✓ FDW setup complete${NC}"

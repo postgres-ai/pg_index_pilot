@@ -412,7 +412,7 @@ The system uses **secure postgres_fdw USER MAPPING** for password management:
 **How it works:**
 1. **Password provided ONCE** during setup:
    ```sql
-   SELECT index_pilot.setup_rds_connection(
+   SELECT index_pilot.setup_connection(
        'your_secure_password',  -- Password provided only here
        'your-instance.region.rds.amazonaws.com',
        5432,

@@ -221,7 +221,7 @@ begin
     begin
         perform dblink_connect_u(_datname, 'index_pilot_self');
     exception when others then
-        raise exception 'FDW connection failed. Please setup postgres_fdw USER MAPPING using setup_rds_connection(): %', sqlerrm;
+        raise exception 'FDW connection failed. Please setup postgres_fdw USER MAPPING using setup_fdw_self_connection() and setup_user_mapping(): %', sqlerrm;
     end;
 end;
 $BODY$
@@ -1286,7 +1286,7 @@ begin
              then 'EXISTS' else 'MISSING' end::text,
         case when exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self')
              then 'index_pilot_self server configured'
-             else 'Run setup_rds_connection() to create' end::text;
+             else 'Run setup_fdw_self_connection() to create' end::text;
              
     -- Check user mapping
     return query select 
@@ -1295,7 +1295,7 @@ begin
              then 'EXISTS' else 'MISSING' end::text,
         case when exists (select 1 from pg_user_mappings where srvname = 'index_pilot_self' and usename = current_user)
              then format('Secure password mapping exists for %s', current_user)
-             else 'Run setup_rds_connection() to create' end::text;
+             else 'Run setup_fdw_self_connection() to create' end::text;
              
     -- Overall security status
     return query select 
@@ -1308,14 +1308,15 @@ begin
                   and exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self')
                   and exists (select 1 from pg_user_mappings where srvname = 'index_pilot_self' and usename = current_user)
              then 'Secure implementation: ONLY postgres_fdw USER MAPPING (no plain text passwords)'
-             else 'Complete setup_rds_connection() for secure operation' end::text;
+             else 'Complete setup with setup_fdw_self_connection() and setup_user_mapping() for secure operation' end::text;
 end;
 $BODY$
 language plpgsql;
 
 -- Setup secure connection using postgres_fdw USER MAPPING ONLY
 -- Secure approach: password provided once via CREATE USER MAPPING
-CREATE OR REPLACE FUNCTION index_pilot.setup_rds_connection(_host text, _port integer DEFAULT 5432, _username text DEFAULT 'index_pilot', _password text DEFAULT NULL)
+-- Works with any PostgreSQL instance (RDS, Cloud SQL, self-hosted, etc.)
+CREATE OR REPLACE FUNCTION index_pilot.setup_connection(_host text, _port integer DEFAULT 5432, _username text DEFAULT 'index_pilot', _password text DEFAULT NULL)
 RETURNS text
 AS
 $BODY$
@@ -1385,7 +1386,7 @@ begin
     return query select 'User Mapping'::text, _setup_result;
     
     -- Step 3: Setup connection parameters
-    select index_pilot.setup_rds_connection(_host, _port, coalesce(_username, 'index_pilot'), _password) into _setup_result;
+    select index_pilot.setup_connection(_host, _port, coalesce(_username, 'index_pilot'), _password) into _setup_result;
     return query select 'Connection Setup'::text, _setup_result;
     
     -- Step 4: Test connection
