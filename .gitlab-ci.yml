@@ -10,6 +10,8 @@ variables:
   POSTGRES_PASSWORD: postgres
   POSTGRES_HOST: postgres
   POSTGRES_HOST_AUTH_METHOD: trust
+  # Allow connections from Docker network for FDW
+  POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=trust"
 
 # Test against multiple PostgreSQL versions
 .test_template: &test_definition
@@ -34,6 +36,11 @@ variables:
       echo "PostgreSQL version:"
       PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT version();"
     - |
+      echo "Checking PostgreSQL connectivity..."
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT inet_server_addr(), inet_server_port();"
+      echo "Checking pg_hba.conf..."
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT * FROM pg_hba_file_rules;"
+    - |
       echo "Running test suite..."
       chmod +x test/run_tests.sh
       # Run from root directory so SQL files can be found
@@ -52,7 +59,8 @@ variables:
 test:pg13:
   <<: *test_definition
   services:
-    - postgres:13-alpine
+    - name: postgres:13-alpine
+      alias: postgres
   tags:
     - docker
 
@@ -60,7 +68,8 @@ test:pg13:
 test:pg14:
   <<: *test_definition
   services:
-    - postgres:14-alpine
+    - name: postgres:14-alpine
+      alias: postgres
   tags:
     - docker
 
@@ -68,7 +77,8 @@ test:pg14:
 test:pg15:
   <<: *test_definition
   services:
-    - postgres:15-alpine
+    - name: postgres:15-alpine
+      alias: postgres
   tags:
     - docker
 
@@ -76,7 +86,8 @@ test:pg15:
 test:pg16:
   <<: *test_definition
   services:
-    - postgres:16-alpine
+    - name: postgres:16-alpine
+      alias: postgres
   tags:
     - docker
 
@@ -84,7 +95,8 @@ test:pg16:
 test:pg17:
   <<: *test_definition
   services:
-    - postgres:17-alpine
+    - name: postgres:17-alpine
+      alias: postgres
   tags:
     - docker
 
@@ -93,7 +105,8 @@ test:nonsuperuser:
   stage: test
   image: postgres:16-alpine
   services:
-    - postgres:16-alpine
+    - name: postgres:16-alpine
+      alias: postgres
   script:
     - apk add --no-cache bash
     - |

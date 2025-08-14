@@ -207,17 +207,74 @@ if [ "$SKIP_INSTALL" != "true" ]; then
     
     # Test FDW connection actually works - REQUIRED
     echo "Testing FDW connection..."
-    if ! psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+    FDW_TEST_SUCCESS=false
+    
+    # Try to test the connection
+    if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
         SELECT index_pilot._connect_securely('$DB_NAME');
-    "; then
+    " 2>/dev/null; then
+        FDW_TEST_SUCCESS=true
+        echo -e "${GREEN}✓ FDW connection test successful${NC}"
+    else
+        # If initial test fails and we're in CI, try recreating with different approach
+        if [ "$DB_HOST" = "postgres" ]; then
+            echo "FDW connection failed with 'postgres', trying Docker network IP..."
+            
+            # Get the actual IP of the postgres container in Docker network
+            # In GitLab CI, containers can reach each other via Docker network IPs
+            POSTGRES_IP=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -tAc "SELECT inet_server_addr()::text" 2>/dev/null || echo "")
+            
+            if [ -n "$POSTGRES_IP" ] && [ "$POSTGRES_IP" != "" ]; then
+                echo "Found PostgreSQL server IP: $POSTGRES_IP"
+                
+                # Recreate FDW with actual IP
+                psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+                    DROP SERVER IF EXISTS index_pilot_self CASCADE;
+                    SELECT index_pilot.setup_fdw_self_connection('$POSTGRES_IP', $DB_PORT, '$DB_NAME');
+                    SELECT index_pilot.setup_user_mapping('$DB_USER', '$DB_PASS');
+                " 2>/dev/null
+                
+                # Also setup rds_superuser if exists
+                if [ -n "$DB_PASS" ]; then
+                    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+                        DO \$\$
+                        BEGIN
+                            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rds_superuser') THEN
+                                DROP USER MAPPING IF EXISTS FOR rds_superuser SERVER index_pilot_self;
+                                CREATE USER MAPPING FOR rds_superuser SERVER index_pilot_self OPTIONS (user '$DB_USER', password '$DB_PASS');
+                            END IF;
+                        END \$\$;
+                    " 2>/dev/null || true
+                fi
+                
+                # Test again with IP
+                if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+                    SELECT index_pilot._connect_securely('$DB_NAME');
+                " 2>/dev/null; then
+                    FDW_TEST_SUCCESS=true
+                    echo -e "${GREEN}✓ FDW connection test successful with IP: $POSTGRES_IP${NC}"
+                fi
+            fi
+        fi
+    fi
+    
+    if [ "$FDW_TEST_SUCCESS" = "false" ]; then
         echo -e "${RED}ERROR: FDW connection test failed${NC}"
-        echo "The tool requires FDW to function. Please check:"
-        echo "1. postgres_fdw extension is installed"
-        echo "2. FDW server is properly configured" 
-        echo "3. User mappings are correct"
+        echo "The tool requires FDW to function. Debugging info:"
+        
+        # Show current FDW configuration for debugging
+        echo "Current FDW configuration:"
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+            SELECT srvname, srvoptions FROM pg_foreign_server WHERE srvname = 'index_pilot_self';
+        " 2>&1 || true
+        
+        echo "Attempting direct connection test:"
+        psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
+            SELECT index_pilot._connect_securely('$DB_NAME');
+        " 2>&1 || true
+        
         exit 1
     fi
-    echo -e "${GREEN}✓ FDW connection test successful${NC}"
     
     echo -e "${GREEN}✓ FDW setup complete${NC}"
     echo ""
