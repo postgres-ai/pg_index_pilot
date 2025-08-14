@@ -18,13 +18,13 @@ select
 
 -- Check pg_index_pilot version
 \echo 'pg_index_pilot Version:'
-select index_watch.version() as "Version";
+select index_pilot.version() as "Version";
 
 \echo ''
 
 -- Check permissions
 \echo 'Permission Check:'
-select permission, status from index_watch.check_permissions();
+select permission, status from index_pilot.check_permissions();
 
 \echo ''
 
@@ -50,7 +50,7 @@ select
 
 -- Show current configuration
 \echo 'Current Configuration:'
-select key, value, comment from index_watch.config order by id;
+select key, value, comment from index_pilot.config order by id;
 
 \echo ''
 
@@ -70,7 +70,7 @@ limit 10;
 
 -- Test basic functionality (dry run)
 \echo 'Testing Basic Functionality (Dry Run):'
-call index_watch.periodic(false);
+call index_pilot.periodic(false);
 
 \echo ''
 
@@ -84,7 +84,7 @@ select
     indexsize,
     best_ratio,
     mtime
-from index_watch.index_current_state
+from index_pilot.index_current_state
 order by mtime desc
 limit 10;
 
@@ -131,7 +131,7 @@ declare
     _has_setup_func boolean := false;
 begin
     -- Count permission issues (skip legacy FDW checks)
-    for _perm in select * from index_watch.check_permissions() loop
+    for _perm in select * from index_pilot.check_permissions() loop
         if not _perm.status and _perm.permission not like '%server%' and _perm.permission not like '%mapping%' then
             _perm_issues := _perm_issues + 1;
         end if;
@@ -152,11 +152,11 @@ begin
         raise notice '✓ All tests passed! pg_index_pilot is ready to use.';
         raise notice '';
         raise notice 'Next steps:';
-        raise notice '1. Configure connection: SELECT index_watch.setup_rds_connection(''host'', 5432, ''user'', ''password'');';
-        raise notice '2. Run a full analysis: CALL index_watch.periodic(true);';
+        raise notice '1. Configure connection: SELECT index_pilot.setup_rds_connection(''host'', 5432, ''user'', ''password'');';
+        raise notice '2. Run a full analysis: CALL index_pilot.periodic(true);';
         raise notice '3. Schedule regular maintenance using pg_cron or external cron';
-        raise notice '4. Monitor results: SELECT * FROM index_watch.history;';
-        raise notice '5. Test fire-and-forget REINDEX: SELECT index_watch._reindex_index(''dbname'', ''schema'', ''table'', ''index'');';
+        raise notice '4. Monitor results: SELECT * FROM index_pilot.history;';
+        raise notice '5. Test fire-and-forget REINDEX: SELECT index_pilot._reindex_index(''dbname'', ''schema'', ''table'', ''index'');';
     else
         raise notice '⚠ Issues found:';
         if _perm_issues > 0 then

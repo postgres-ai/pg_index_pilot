@@ -3,8 +3,8 @@
 --disable useless (in this particular case) NOTICE noise
 set client_min_messages to WARNING;
 
-DROP FUNCTION IF EXISTS index_watch.check_pg_version_bugfixed();
-CREATE OR REPLACE FUNCTION index_watch._check_pg_version_bugfixed()
+DROP FUNCTION IF EXISTS index_pilot.check_pg_version_bugfixed();
+CREATE OR REPLACE FUNCTION index_pilot._check_pg_version_bugfixed()
 RETURNS BOOLEAN AS
 $BODY$
 BEGIN
@@ -21,8 +21,8 @@ $BODY$
 LANGUAGE plpgsql;
 
 
-DROP FUNCTION IF EXISTS index_watch.check_pg14_version_bugfixed();
-CREATE OR REPLACE FUNCTION index_watch._check_pg14_version_bugfixed()
+DROP FUNCTION IF EXISTS index_pilot.check_pg14_version_bugfixed();
+CREATE OR REPLACE FUNCTION index_pilot._check_pg14_version_bugfixed()
 RETURNS BOOLEAN AS
 $BODY$
 BEGIN
@@ -42,17 +42,17 @@ BEGIN
   THEN
     RAISE 'This library works only for PostgreSQL 12 or higher!';
   ELSE
-    IF NOT index_watch._check_pg_version_bugfixed()
+    IF NOT index_pilot._check_pg_version_bugfixed()
     THEN
-       RAISE WARNING 'The database version % affected by PostgreSQL bugs which make use pg_index_watch potentially unsafe, please update to latest minor release. For additional info please see:
+       RAISE WARNING 'The database version % affected by PostgreSQL bugs which make use pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
    https://www.postgresql.org/message-id/E1mumI4-0001Zp-PB@gemulon.postgresql.org
    and
    https://www.postgresql.org/message-id/E1n8C7O-00066j-Q5@gemulon.postgresql.org',
        current_setting('server_version');
     END IF;
-    IF NOT index_watch._check_pg14_version_bugfixed()
+    IF NOT index_pilot._check_pg14_version_bugfixed()
       THEN
-         RAISE WARNING 'The database version % affected by PostgreSQL bug BUG #17485 which make use pg_index_watch unsafe, please update to latest minor release. For additional info please see:
+         RAISE WARNING 'The database version % affected by PostgreSQL bug BUG #17485 which make use pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
        https://www.postgresql.org/message-id/202205251144.6t4urostzc3s@alvherre.pgsql',
         current_setting('server_version');
     END IF;
@@ -64,7 +64,7 @@ CREATE EXTENSION IF NOT EXISTS dblink;
 -- ALTER EXTENSION dblink UPDATE;
 
 --current version of code
-CREATE OR REPLACE FUNCTION index_watch.version()
+CREATE OR REPLACE FUNCTION index_pilot.version()
 RETURNS TEXT AS
 $BODY$
 BEGIN
@@ -76,16 +76,16 @@ LANGUAGE plpgsql IMMUTABLE;
 
 
 --minimum table structure version required
-CREATE OR REPLACE FUNCTION index_watch._check_structure_version()
+CREATE OR REPLACE FUNCTION index_pilot._check_structure_version()
 RETURNS VOID AS
 $BODY$
 DECLARE
   _tables_version INTEGER;
   _required_version INTEGER := 8;
 BEGIN
-    SELECT version INTO STRICT _tables_version FROM index_watch.tables_version;
+    SELECT version INTO STRICT _tables_version FROM index_pilot.tables_version;
     IF (_tables_version<_required_version) THEN
-       RAISE EXCEPTION 'Current tables version % is less than minimally required % for % code version, please update tables structure', _tables_version, _required_version, index_watch.version();
+       RAISE EXCEPTION 'Current tables version % is less than minimally required % for % code version, please update tables structure', _tables_version, _required_version, index_pilot.version();
     END IF;
 END;
 $BODY$
@@ -93,16 +93,16 @@ LANGUAGE plpgsql;
 
 
 
-CREATE OR REPLACE FUNCTION index_watch.check_update_structure_version()
+CREATE OR REPLACE FUNCTION index_pilot.check_update_structure_version()
 RETURNS VOID AS
 $BODY$
 DECLARE
    _tables_version INTEGER;
    _required_version INTEGER := 8;
 BEGIN
-   SELECT version INTO STRICT _tables_version FROM index_watch.tables_version;
+   SELECT version INTO STRICT _tables_version FROM index_pilot.tables_version;
    WHILE (_tables_version<_required_version) LOOP
-      EXECUTE 'SELECT index_watch._structure_version_'||_tables_version||'_'||_tables_version+1||'()';
+      EXECUTE 'SELECT index_pilot._structure_version_'||_tables_version||'_'||_tables_version+1||'()';
    _tables_version := _tables_version+1;
 END LOOP;
     RETURN;
@@ -112,18 +112,18 @@ LANGUAGE plpgsql;
 
 
 --update table structure version from 1 to 2
-CREATE OR REPLACE FUNCTION index_watch._structure_version_1_2()
+CREATE OR REPLACE FUNCTION index_pilot._structure_version_1_2()
 RETURNS VOID AS
 $BODY$
 BEGIN
-   CREATE VIEW index_watch.history AS
+   CREATE VIEW index_pilot.history AS
       SELECT date_trunc('second', entry_timestamp)::timestamp AS ts,
          datname AS db, schemaname AS schema, relname AS table,
          indexrelname AS index, indexsize_before AS size_before, indexsize_after AS size_after,
          (indexsize_before::float/indexsize_after)::numeric(12,2) AS ratio,
          estimated_tuples AS tuples, date_trunc('seconds', reindex_duration) AS duration
-      FROM index_watch.reindex_history ORDER BY id DESC;
-   UPDATE index_watch.tables_version SET version=2;
+      FROM index_pilot.reindex_history ORDER BY id DESC;
+   UPDATE index_pilot.tables_version SET version=2;
    RETURN;
 END;
 $BODY$
@@ -131,11 +131,11 @@ LANGUAGE plpgsql;
 
 
 --update table structure version from 2 to 3
-CREATE OR REPLACE FUNCTION index_watch._structure_version_2_3()
+CREATE OR REPLACE FUNCTION index_pilot._structure_version_2_3()
 RETURNS VOID AS
 $BODY$
 BEGIN
-   CREATE TABLE IF NOT EXISTS index_watch.index_current_state
+   CREATE TABLE IF NOT EXISTS index_pilot.index_current_state
    (
      id bigserial primary key,
      mtime timestamptz not null default now(),
@@ -147,9 +147,9 @@ BEGIN
      estimated_tuples BIGINT not null,
      best_ratio REAL
    );
-   CREATE UNIQUE INDEX index_current_state_index on index_watch.index_current_state(datname, schemaname, relname, indexrelname);
+   CREATE UNIQUE INDEX index_current_state_index on index_pilot.index_current_state(datname, schemaname, relname, indexrelname);
 
-   UPDATE index_watch.config SET value='128kB'
+   UPDATE index_pilot.config SET value='128kB'
    WHERE key='minimum_reliable_index_size' AND pg_size_bytes(value)<pg_size_bytes('128kB');
 
    WITH
@@ -157,7 +157,7 @@ BEGIN
     SELECT
       DISTINCT ON (datname, schemaname, relname, indexrelname)
       reindex_history.datname, reindex_history.schemaname, reindex_history.relname, reindex_history.indexrelname, entry_timestamp, estimated_tuples, indexsize_after AS indexsize
-      FROM index_watch.reindex_history
+      FROM index_pilot.reindex_history
       ORDER BY datname, schemaname, relname, indexrelname, entry_timestamp DESC
     ),
     _all_history_since_reindex AS (
@@ -167,7 +167,7 @@ BEGIN
        UNION ALL
        --all values since reindex or from start
        SELECT index_history.datname, index_history.schemaname, index_history.relname, index_history.indexrelname, index_history.entry_timestamp, index_history.estimated_tuples, index_history.indexsize
-       FROM index_watch.index_history
+       FROM index_pilot.index_history
        LEFT JOIN _last_reindex_values USING (datname, schemaname, relname, indexrelname)
        WHERE index_history.entry_timestamp>=coalesce(_last_reindex_values.entry_timestamp, '-INFINITY'::timestamp)
     ),
@@ -189,12 +189,12 @@ BEGIN
       FROM _all_history_since_reindex
       ORDER BY datname, schemaname, relname, indexrelname, entry_timestamp DESC
     )
-    INSERT INTO index_watch.index_current_state
+    INSERT INTO index_pilot.index_current_state
       (mtime, datname, schemaname, relname, indexrelname, indexsize, estimated_tuples, best_ratio)
       SELECT c.entry_timestamp, c.datname, c.schemaname, c.relname, c.indexrelname, c.indexsize, c.estimated_tuples, best_ratio
       FROM _current_state c JOIN _best_values USING (datname, schemaname, relname, indexrelname);
-   DROP TABLE index_watch.index_history;
-   UPDATE index_watch.tables_version SET version=3;
+   DROP TABLE index_pilot.index_history;
+   UPDATE index_pilot.tables_version SET version=3;
    RETURN;
 END;
 $BODY$
@@ -203,7 +203,7 @@ LANGUAGE plpgsql;
 
 -- set dblink connection for current database using FDW approach
 -- Secure connection using ONLY postgres_fdw USER MAPPING (secure approach)
-create or replace function index_watch._connect_securely(_datname name) returns void as
+create or replace function index_pilot._connect_securely(_datname name) returns void as
 $BODY$
 begin
     -- Only allow connection to current database (managed services compatible mode)
@@ -227,12 +227,12 @@ end;
 $BODY$
 language plpgsql;
 
-create or replace function index_watch._dblink_connect_if_not(_datname name) returns void as
+create or replace function index_pilot._dblink_connect_if_not(_datname name) returns void as
 $BODY$
 begin
     -- Use secure FDW connection if not already connected
     if _datname = any(dblink_get_connections()) is not true then
-        perform index_watch._connect_securely(_datname);
+        perform index_pilot._connect_securely(_datname);
     end if;
     return;
 end;
@@ -241,18 +241,18 @@ language plpgsql;
 
 
 
-CREATE OR REPLACE FUNCTION index_watch._remote_get_indexes_indexrelid(_datname name)
+CREATE OR REPLACE FUNCTION index_pilot._remote_get_indexes_indexrelid(_datname name)
 RETURNS TABLE(datname name, schemaname name, relname name, indexrelname name, indexrelid OID)
 AS
 $BODY$
 DECLARE
     _use_toast_tables text;
 BEGIN
-    IF index_watch._check_pg_version_bugfixed() THEN _use_toast_tables := 'True';
+    IF index_pilot._check_pg_version_bugfixed() THEN _use_toast_tables := 'True';
     ELSE _use_toast_tables := 'False';
     END IF;
     -- Secure FDW connection for querying indexes
-    PERFORM index_watch._connect_securely(_datname);
+    PERFORM index_pilot._connect_securely(_datname);
     
     RETURN QUERY SELECT
       _datname, _res.schemaname, _res.relname, _res.indexrelname, _res.indexrelid
@@ -284,10 +284,10 @@ BEGIN
           )
       --ignore exclusion constraints
       AND NOT EXISTS (SELECT FROM pg_constraint WHERE pg_constraint.conindid=i.oid and pg_constraint.contype='x')
-      --ignore indexes for system tables and index_watch own tables
-      AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'index_watch')
-      --ignore indexes on toast tables of system tables and index_watch own tables
-      AND (n1.nspname IS NULL OR n1.nspname NOT IN ('pg_catalog', 'information_schema', 'index_watch'))
+      --ignore indexes for system tables and index_pilot own tables
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'index_pilot')
+      --ignore indexes on toast tables of system tables and index_pilot own tables
+      AND (n1.nspname IS NULL OR n1.nspname NOT IN ('pg_catalog', 'information_schema', 'index_pilot'))
       --skip BRIN indexes... please see bug BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
       AND a.amname NOT IN ('brin') AND x.indislive IS TRUE
       --skip indexes on temp relations
@@ -305,34 +305,34 @@ LANGUAGE plpgsql;
 
 
 --update table structure version from 3 to 4
-CREATE OR REPLACE FUNCTION index_watch._structure_version_3_4()
+CREATE OR REPLACE FUNCTION index_pilot._structure_version_3_4()
 RETURNS VOID AS
 $BODY$
 DECLARE
   _datname NAME;
 BEGIN
-   ALTER TABLE index_watch.reindex_history
+   ALTER TABLE index_pilot.reindex_history
       ADD COLUMN indexrelid OID;
-   CREATE INDEX reindex_history_oid_index on index_watch.reindex_history(datname, indexrelid);
+   CREATE INDEX reindex_history_oid_index on index_pilot.reindex_history(datname, indexrelid);
 
-   ALTER TABLE index_watch.index_current_state
+   ALTER TABLE index_pilot.index_current_state
       ADD COLUMN indexrelid OID;
-   CREATE UNIQUE INDEX index_current_state_oid_index on index_watch.index_current_state(datname, indexrelid);
-   DROP INDEX IF EXISTS index_watch.index_current_state_index;
-   CREATE INDEX index_current_state_index on index_watch.index_current_state(datname, schemaname, relname, indexrelname);
+   CREATE UNIQUE INDEX index_current_state_oid_index on index_pilot.index_current_state(datname, indexrelid);
+   DROP INDEX IF EXISTS index_pilot.index_current_state_index;
+   CREATE INDEX index_current_state_index on index_pilot.index_current_state(datname, schemaname, relname, indexrelname);
 
    -- add indexrelid values into index_current_state
    FOR _datname IN
-     SELECT DISTINCT datname FROM index_watch.index_current_state
+     SELECT DISTINCT datname FROM index_pilot.index_current_state
      ORDER BY datname
    LOOP
-     PERFORM index_watch._dblink_connect_if_not(_datname);
+     PERFORM index_pilot._dblink_connect_if_not(_datname);
      --update current state of ALL indexes in target database
      WITH _actual_indexes AS (
         SELECT schemaname, relname, indexrelname, indexrelid
-        FROM index_watch._remote_get_indexes_indexrelid(_datname)
+        FROM index_pilot._remote_get_indexes_indexrelid(_datname)
      )
-     UPDATE index_watch.index_current_state AS i
+     UPDATE index_pilot.index_current_state AS i
         SET indexrelid=_actual_indexes.indexrelid
         FROM _actual_indexes
             WHERE
@@ -342,9 +342,9 @@ BEGIN
              AND i.datname=_datname;
      PERFORM dblink_disconnect(_datname);
    END LOOP;
-   DELETE FROM index_watch.index_current_state WHERE indexrelid IS NULL;
-   ALTER TABLE index_watch.index_current_state ALTER indexrelid SET NOT NULL;
-   UPDATE index_watch.tables_version SET version=4;
+   DELETE FROM index_pilot.index_current_state WHERE indexrelid IS NULL;
+   ALTER TABLE index_pilot.index_current_state ALTER indexrelid SET NOT NULL;
+   UPDATE index_pilot.tables_version SET version=4;
    RETURN;
 END;
 $BODY$
@@ -352,30 +352,30 @@ LANGUAGE plpgsql;
 
 
 --update table structure version from 4 to 5
-CREATE OR REPLACE FUNCTION index_watch._structure_version_4_5()
+CREATE OR REPLACE FUNCTION index_pilot._structure_version_4_5()
 RETURNS VOID AS
 $BODY$
 DECLARE
   _datname NAME;
 BEGIN
-   ALTER TABLE index_watch.reindex_history
+   ALTER TABLE index_pilot.reindex_history
       ADD COLUMN datid OID;
-   DROP INDEX IF EXISTS index_watch.reindex_history_oid_index;
-   CREATE INDEX reindex_history_oid_index on index_watch.reindex_history(datid, indexrelid);
+   DROP INDEX IF EXISTS index_pilot.reindex_history_oid_index;
+   CREATE INDEX reindex_history_oid_index on index_pilot.reindex_history(datid, indexrelid);
 
-   ALTER TABLE index_watch.index_current_state
+   ALTER TABLE index_pilot.index_current_state
       ADD COLUMN datid OID;
-   DROP INDEX IF EXISTS index_watch.index_current_state_oid_index;
-   CREATE UNIQUE INDEX index_current_state_oid_index on index_watch.index_current_state(datid, indexrelid);
+   DROP INDEX IF EXISTS index_pilot.index_current_state_oid_index;
+   CREATE UNIQUE INDEX index_current_state_oid_index on index_pilot.index_current_state(datid, indexrelid);
 
    -- add datid values into index_current_state
-  UPDATE index_watch.index_current_state AS i
+  UPDATE index_pilot.index_current_state AS i
      SET datid=p.oid
      FROM pg_database p
          WHERE i.datname=p.datname;
-   DELETE FROM index_watch.index_current_state WHERE datid IS NULL;
-   ALTER TABLE index_watch.index_current_state ALTER datid SET NOT NULL;
-   UPDATE index_watch.tables_version SET version=5;
+   DELETE FROM index_pilot.index_current_state WHERE datid IS NULL;
+   ALTER TABLE index_pilot.index_current_state ALTER datid SET NOT NULL;
+   UPDATE index_pilot.tables_version SET version=5;
    RETURN;
 END;
 $BODY$
@@ -383,13 +383,13 @@ LANGUAGE plpgsql;
 
 
 --update table structure version from 5 to 6
-CREATE OR REPLACE FUNCTION index_watch._structure_version_5_6()
+CREATE OR REPLACE FUNCTION index_pilot._structure_version_5_6()
 RETURNS VOID AS
 $BODY$
 BEGIN
-   ALTER TABLE index_watch.index_current_state
+   ALTER TABLE index_pilot.index_current_state
       ADD COLUMN indisvalid BOOLEAN not null DEFAULT TRUE;
-   UPDATE index_watch.tables_version SET version=6;
+   UPDATE index_pilot.tables_version SET version=6;
    RETURN;
 END;
 $BODY$
@@ -398,21 +398,21 @@ LANGUAGE plpgsql;
 
 
 --update table structure version from 6 to 7
-CREATE OR REPLACE FUNCTION index_watch._structure_version_6_7()
+CREATE OR REPLACE FUNCTION index_pilot._structure_version_6_7()
 RETURNS VOID AS
 $BODY$
 BEGIN
-   DROP VIEW IF EXISTS index_watch.history;
-   CREATE VIEW index_watch.history AS
+   DROP VIEW IF EXISTS index_pilot.history;
+   CREATE VIEW index_pilot.history AS
      SELECT date_trunc('second', entry_timestamp)::timestamp AS ts,
           datname AS db, schemaname AS schema, relname AS table,
           indexrelname AS index, pg_size_pretty(indexsize_before) AS size_before,
           pg_size_pretty(indexsize_after) AS size_after,
           (indexsize_before::float/indexsize_after)::numeric(12,2) AS ratio,
           pg_size_pretty(estimated_tuples) AS tuples, date_trunc('seconds', reindex_duration) AS duration
-     FROM index_watch.reindex_history ORDER BY id DESC;
+     FROM index_pilot.reindex_history ORDER BY id DESC;
 
-   UPDATE index_watch.tables_version SET version=7;
+   UPDATE index_pilot.tables_version SET version=7;
    RETURN;
 END;
 $BODY$
@@ -420,11 +420,11 @@ LANGUAGE plpgsql;
 
 
 --update table structure version from 7 to 8
-CREATE OR REPLACE FUNCTION index_watch._structure_version_7_8()
+CREATE OR REPLACE FUNCTION index_pilot._structure_version_7_8()
 RETURNS VOID AS
 $BODY$
 BEGIN
-   CREATE TABLE IF NOT EXISTS index_watch.current_processed_index
+   CREATE TABLE IF NOT EXISTS index_pilot.current_processed_index
    (
       id bigserial primary key,
       mtime timestamptz not null default now(),
@@ -434,7 +434,7 @@ BEGIN
       indexrelname name not null
    );
 
-   UPDATE index_watch.tables_version SET version=8;
+   UPDATE index_pilot.tables_version SET version=8;
    RETURN;
 END;
 $BODY$
@@ -442,7 +442,7 @@ LANGUAGE plpgsql;
 
 
 --convert patterns from psql format to like format
-CREATE OR REPLACE FUNCTION index_watch._pattern_convert(_var text)
+CREATE OR REPLACE FUNCTION index_pilot._pattern_convert(_var text)
 RETURNS TEXT AS
 $BODY$
 BEGIN
@@ -457,51 +457,51 @@ $BODY$
 LANGUAGE plpgsql STRICT IMMUTABLE;
 
 
-CREATE OR REPLACE FUNCTION index_watch.get_setting(_datname text, _schemaname text, _relname text, _indexrelname text, _key TEXT)
+CREATE OR REPLACE FUNCTION index_pilot.get_setting(_datname text, _schemaname text, _relname text, _indexrelname text, _key TEXT)
 RETURNS TEXT AS
 $BODY$
 DECLARE
     _value TEXT;
 BEGIN
-    PERFORM index_watch._check_structure_version();
+    PERFORM index_pilot._check_structure_version();
     --RAISE NOTICE 'DEBUG: |%|%|%|%|', _datname, _schemaname, _relname, _indexrelname;
     SELECT _t.value INTO _value FROM (
       --per index setting
-      SELECT 1 AS priority, value FROM index_watch.config WHERE
+      SELECT 1 AS priority, value FROM index_pilot.config WHERE
         _key=config.key
-	AND (_datname      OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.datname))
-	AND (_schemaname   OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.schemaname))
-	AND (_relname      OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.relname))
-	AND (_indexrelname OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.indexrelname))
+	AND (_datname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.datname))
+	AND (_schemaname   OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.schemaname))
+	AND (_relname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.relname))
+	AND (_indexrelname OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.indexrelname))
 	AND config.indexrelname IS NOT NULL
 	AND TRUE
       UNION ALL
       --per table setting
-      SELECT 2 AS priority, value FROM index_watch.config WHERE
+      SELECT 2 AS priority, value FROM index_pilot.config WHERE
         _key=config.key
-        AND (_datname      OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.datname))
-        AND (_schemaname   OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.schemaname))
-        AND (_relname      OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.relname))
+        AND (_datname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.datname))
+        AND (_schemaname   OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.schemaname))
+        AND (_relname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.relname))
         AND config.relname IS NOT NULL
         AND config.indexrelname IS NULL
       UNION ALL
       --per schema setting
-      SELECT 3 AS priority, value FROM index_watch.config WHERE
+      SELECT 3 AS priority, value FROM index_pilot.config WHERE
         _key=config.key
-        AND (_datname      OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.datname))
-        AND (_schemaname   OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.schemaname))
+        AND (_datname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.datname))
+        AND (_schemaname   OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.schemaname))
         AND config.schemaname IS NOT NULL
         AND config.relname IS NULL
       UNION ALL
       --per database setting
-      SELECT 4 AS priority, value FROM index_watch.config WHERE
+      SELECT 4 AS priority, value FROM index_pilot.config WHERE
         _key=config.key
-        AND (_datname      OPERATOR(pg_catalog.~) index_watch._pattern_convert(config.datname))
+        AND (_datname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.datname))
         AND config.datname IS NOT NULL
         AND config.schemaname IS NULL
       UNION ALL
       --global setting
-      SELECT 5 AS priority, value FROM index_watch.config WHERE
+      SELECT 5 AS priority, value FROM index_pilot.config WHERE
         _key=config.key
         AND config.datname IS NULL
     ) AS _t
@@ -514,29 +514,29 @@ $BODY$
 LANGUAGE plpgsql STABLE;
 
 
-CREATE OR REPLACE FUNCTION index_watch.set_or_replace_setting(_datname text, _schemaname text, _relname text, _indexrelname text, _key TEXT, _value text, _comment text)
+CREATE OR REPLACE FUNCTION index_pilot.set_or_replace_setting(_datname text, _schemaname text, _relname text, _indexrelname text, _key TEXT, _value text, _comment text)
 RETURNS VOID AS
 $BODY$
 BEGIN
-    PERFORM index_watch._check_structure_version();
+    PERFORM index_pilot._check_structure_version();
     IF _datname IS NULL       THEN
-      INSERT INTO index_watch.config (datname, schemaname, relname, indexrelname, key, value, comment)
+      INSERT INTO index_pilot.config (datname, schemaname, relname, indexrelname, key, value, comment)
       VALUES (_datname, _schemaname, _relname, _indexrelname, _key, _value, _comment)
       ON CONFLICT (key) WHERE datname IS NULL DO UPDATE SET value=EXCLUDED.value, comment=EXCLUDED.comment;
     ELSIF _schemaname IS NULL THEN
-      INSERT INTO index_watch.config (datname, schemaname, relname, indexrelname, key, value, comment)
+      INSERT INTO index_pilot.config (datname, schemaname, relname, indexrelname, key, value, comment)
       VALUES (_datname, _schemaname, _relname, _indexrelname, _key, _value, _comment)
       ON CONFLICT (key, datname) WHERE schemaname IS NULL DO UPDATE SET value=EXCLUDED.value, comment=EXCLUDED.comment;
     ELSIF _relname IS NULL    THEN
-      INSERT INTO index_watch.config (datname, schemaname, relname, indexrelname, key, value, comment)
+      INSERT INTO index_pilot.config (datname, schemaname, relname, indexrelname, key, value, comment)
       VALUES (_datname, _schemaname, _relname, _indexrelname, _key, _value, _comment)
       ON CONFLICT (key, datname, schemaname) WHERE relname IS NULL DO UPDATE SET value=EXCLUDED.value, comment=EXCLUDED.comment;
     ELSIF _indexrelname IS NULL THEN
-      INSERT INTO index_watch.config (datname, schemaname, relname, indexrelname, key, value, comment)
+      INSERT INTO index_pilot.config (datname, schemaname, relname, indexrelname, key, value, comment)
       VALUES (_datname, _schemaname, _relname, _indexrelname, _key, _value, _comment)
       ON CONFLICT (key, datname, schemaname, relname) WHERE indexrelname IS NULL DO UPDATE SET value=EXCLUDED.value, comment=EXCLUDED.comment;
     ELSE
-      INSERT INTO index_watch.config (datname, schemaname, relname, indexrelname, key, value, comment)
+      INSERT INTO index_pilot.config (datname, schemaname, relname, indexrelname, key, value, comment)
       VALUES (_datname, _schemaname, _relname, _indexrelname, _key, _value, _comment)
       ON CONFLICT (key, datname, schemaname, relname, indexrelname) DO UPDATE SET value=EXCLUDED.value, comment=EXCLUDED.comment;
     END IF;
@@ -546,19 +546,19 @@ $BODY$
 LANGUAGE plpgsql;
 
 
-DROP FUNCTION IF EXISTS index_watch._remote_get_indexes_info(name,name,name,name);
-CREATE OR REPLACE FUNCTION index_watch._remote_get_indexes_info(_datname name, _schemaname name, _relname name, _indexrelname name)
+DROP FUNCTION IF EXISTS index_pilot._remote_get_indexes_info(name,name,name,name);
+CREATE OR REPLACE FUNCTION index_pilot._remote_get_indexes_info(_datname name, _schemaname name, _relname name, _indexrelname name)
 RETURNS TABLE(datid OID, indexrelid OID, datname name, schemaname name, relname name, indexrelname name, indisvalid BOOLEAN, indexsize BIGINT, estimated_tuples BIGINT)
 AS
 $BODY$
 DECLARE
    _use_toast_tables text;
 BEGIN
-    IF index_watch._check_pg_version_bugfixed() THEN _use_toast_tables := 'True';
+    IF index_pilot._check_pg_version_bugfixed() THEN _use_toast_tables := 'True';
     ELSE _use_toast_tables := 'False';
     END IF;
     -- Secure FDW connection for querying index info
-    PERFORM index_watch._connect_securely(_datname);
+    PERFORM index_pilot._connect_securely(_datname);
     
     RETURN QUERY SELECT
       d.oid as datid, _res.indexrelid, _datname, _res.schemaname, _res.relname, _res.indexrelname, _res.indisvalid, _res.indexsize
@@ -599,10 +599,10 @@ BEGIN
           )
       --ignore exclusion constraints
       AND NOT EXISTS (SELECT FROM pg_constraint WHERE pg_constraint.conindid=i.oid and pg_constraint.contype='x')
-      --ignore indexes for system tables and index_watch own tables
-      AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'index_watch')
-      --ignore indexes on toast tables of system tables and index_watch own tables
-      AND (n1.nspname IS NULL OR n1.nspname NOT IN ('pg_catalog', 'information_schema', 'index_watch'))
+      --ignore indexes for system tables and index_pilot own tables
+      AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'index_pilot')
+      --ignore indexes on toast tables of system tables and index_pilot own tables
+      AND (n1.nspname IS NULL OR n1.nspname NOT IN ('pg_catalog', 'information_schema', 'index_pilot'))
       --skip BRIN indexes... please see bug BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
       AND a.amname NOT IN ('brin') AND x.indislive IS TRUE
       --skip indexes on temp relations
@@ -627,8 +627,8 @@ $BODY$
 LANGUAGE plpgsql;
 
 
-DROP FUNCTION IF EXISTS index_watch._record_indexes_info(name, name, name, name);
-CREATE OR REPLACE FUNCTION index_watch._record_indexes_info(_datname name, _schemaname name, _relname name, _indexrelname name, _force_populate boolean DEFAULT false)
+DROP FUNCTION IF EXISTS index_pilot._record_indexes_info(name, name, name, name);
+CREATE OR REPLACE FUNCTION index_pilot._record_indexes_info(_datname name, _schemaname name, _relname name, _indexrelname name, _force_populate boolean DEFAULT false)
 RETURNS VOID
 AS
 $BODY$
@@ -636,17 +636,17 @@ DECLARE
   index_info RECORD;
 BEGIN
   -- Establish dblink connection for managed services mode
-  PERFORM index_watch._dblink_connect_if_not(_datname);
+  PERFORM index_pilot._dblink_connect_if_not(_datname);
   
   --merge index data fetched from the database and index_current_state
   --now keep info about all potentially interesting indexes (even small ones)
   --we can do it now because we keep exactly one entry in index_current_state per index (without history)
   WITH _actual_indexes AS (
      SELECT datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples
-     FROM index_watch._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
+     FROM index_pilot._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
   ),
   _old_indexes AS (
-       DELETE FROM index_watch.index_current_state AS i
+       DELETE FROM index_pilot.index_current_state AS i
        WHERE NOT EXISTS (
            SELECT FROM _actual_indexes
            WHERE
@@ -658,13 +658,13 @@ BEGIN
         AND (_relname IS NULL      OR i.relname=_relname)
         AND (_indexrelname IS NULL OR i.indexrelname=_indexrelname)
   )
-  --todo: do something with ugly code duplication in index_watch._reindex_index and index_watch._record_indexes_info
-  INSERT INTO index_watch.index_current_state AS i
+  --todo: do something with ugly code duplication in index_pilot._reindex_index and index_pilot._record_indexes_info
+  INSERT INTO index_pilot.index_current_state AS i
   (datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples, best_ratio)
   SELECT datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples,
     CASE
     --_force_populate=TRUE set (or write) best ratio to current ratio (except the case when index too small to be realiable estimated)
-    WHEN (_force_populate AND indexsize > pg_size_bytes(index_watch.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size')))
+    WHEN (_force_populate AND indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size')))
       THEN indexsize::real/estimated_tuples::real
     --best_ratio estimation are NULL for the NEW index entries because we don't have any bloat information for it (default behavior)
     ELSE
@@ -685,11 +685,11 @@ BEGIN
     best_ratio=
       CASE
       --_force_populate=TRUE set (or write) best ratio to current ratio (except the case when index too small to be realiable estimated)
-      WHEN (_force_populate AND EXCLUDED.indexsize > pg_size_bytes(index_watch.get_setting(EXCLUDED.datname, EXCLUDED.schemaname, EXCLUDED.relname, EXCLUDED.indexrelname, 'minimum_reliable_index_size')))
+      WHEN (_force_populate AND EXCLUDED.indexsize > pg_size_bytes(index_pilot.get_setting(EXCLUDED.datname, EXCLUDED.schemaname, EXCLUDED.relname, EXCLUDED.indexrelname, 'minimum_reliable_index_size')))
         THEN EXCLUDED.indexsize::real/EXCLUDED.estimated_tuples::real
       --if the new index size less than minimum_reliable_index_size - we cannot use it's size and tuples as reliable gauge for the best_ratio
       --so keep old best_ratio value instead as best guess
-      WHEN (EXCLUDED.indexsize < pg_size_bytes(index_watch.get_setting(EXCLUDED.datname, EXCLUDED.schemaname, EXCLUDED.relname, EXCLUDED.indexrelname, 'minimum_reliable_index_size')))
+      WHEN (EXCLUDED.indexsize < pg_size_bytes(index_pilot.get_setting(EXCLUDED.datname, EXCLUDED.schemaname, EXCLUDED.relname, EXCLUDED.indexrelname, 'minimum_reliable_index_size')))
         THEN i.best_ratio
       --do not overrrid NULL best ratio (we don't have any reliable ratio info at this stage)
       WHEN (i.best_ratio IS NULL)
@@ -701,7 +701,7 @@ BEGIN
 
   --tell about not valid indexes
   FOR index_info IN
-    SELECT indexrelname, relname, schemaname, datname FROM index_watch.index_current_state
+    SELECT indexrelname, relname, schemaname, datname FROM index_pilot.index_current_state
       WHERE indisvalid IS FALSE
       AND datname=_datname
       AND (_schemaname IS NULL OR schemaname=_schemaname)
@@ -718,14 +718,14 @@ LANGUAGE plpgsql;
 
 
 
-CREATE OR REPLACE FUNCTION index_watch._cleanup_old_records() RETURNS VOID AS
+CREATE OR REPLACE FUNCTION index_pilot._cleanup_old_records() RETURNS VOID AS
 $BODY$
 BEGIN
     --TODO replace with fast distinct implementation
     WITH
-        rels AS MATERIALIZED (SELECT DISTINCT datname, schemaname, relname, indexrelname FROM index_watch.reindex_history),
-        age_limit AS MATERIALIZED (SELECT *, now()-index_watch.get_setting(datname,schemaname,relname,indexrelname,  'reindex_history_retention_period')::interval AS max_age FROM rels)
-    DELETE FROM index_watch.reindex_history
+        rels AS MATERIALIZED (SELECT DISTINCT datname, schemaname, relname, indexrelname FROM index_pilot.reindex_history),
+        age_limit AS MATERIALIZED (SELECT *, now()-index_pilot.get_setting(datname,schemaname,relname,indexrelname,  'reindex_history_retention_period')::interval AS max_age FROM rels)
+    DELETE FROM index_pilot.reindex_history
         USING age_limit
         WHERE
             reindex_history.datname=age_limit.datname
@@ -734,12 +734,12 @@ BEGIN
             AND reindex_history.indexrelname=age_limit.indexrelname
             AND reindex_history.entry_timestamp<age_limit.max_age;
     --clean index_current_state for not existing databases
-    DELETE FROM index_watch.index_current_state WHERE datid NOT IN (
+    DELETE FROM index_pilot.index_current_state WHERE datid NOT IN (
       SELECT oid FROM pg_database
       WHERE
         NOT datistemplate
         AND datallowconn
-        AND index_watch.get_setting(datname, NULL, NULL, NULL, 'skip')::boolean IS DISTINCT FROM TRUE
+        AND index_pilot.get_setting(datname, NULL, NULL, NULL, 'skip')::boolean IS DISTINCT FROM TRUE
     );
 
     RETURN;
@@ -750,20 +750,20 @@ LANGUAGE plpgsql;
 
 
 
-CREATE OR REPLACE FUNCTION index_watch.get_index_bloat_estimates(_datname name)
+CREATE OR REPLACE FUNCTION index_pilot.get_index_bloat_estimates(_datname name)
 RETURNS TABLE(datname name, schemaname name, relname name, indexrelname name, indexsize bigint, estimated_bloat real)
 AS
 $BODY$
 DECLARE
    _datid OID;
 BEGIN
-  PERFORM index_watch._check_structure_version();
+  PERFORM index_pilot._check_structure_version();
   SELECT oid FROM pg_database d WHERE d.datname = _datname INTO _datid;
   -- compare current size to tuples ratio with the the best value
   RETURN QUERY
   SELECT _datname, i.schemaname, i.relname, i.indexrelname, i.indexsize,
   (i.indexsize::real/(i.best_ratio*estimated_tuples::real)) AS estimated_bloat
-  FROM index_watch.index_current_state AS i
+  FROM index_pilot.index_current_state AS i
   WHERE i.datid = _datid
   -- AND indisvalid IS TRUE
   --NULLS FIRST because indexes listed with NULL in estimated bloat going to be reindexed on next cron run
@@ -776,7 +776,7 @@ LANGUAGE plpgsql STRICT;
 
 
 
-CREATE OR REPLACE FUNCTION index_watch._reindex_index(_datname name, _schemaname name, _relname name, _indexrelname name)
+CREATE OR REPLACE FUNCTION index_pilot._reindex_index(_datname name, _schemaname name, _relname name, _indexrelname name)
 RETURNS VOID
 AS
 $BODY$
@@ -793,7 +793,7 @@ DECLARE
 BEGIN
   -- Establish secure dblink connection via FDW (always recreate for reliability)
   BEGIN
-    PERFORM index_watch._connect_securely(_datname);
+    PERFORM index_pilot._connect_securely(_datname);
     RAISE NOTICE 'Created secure FDW connection: %', _datname;
   EXCEPTION WHEN OTHERS THEN
     RAISE EXCEPTION 'Failed to create secure FDW connection "%": %', _datname, SQLERRM;
@@ -804,7 +804,7 @@ BEGIN
   --get initial actual index size and verify that the index indeed exists in the target database
   --PS: english articles are driving me mad periodically
   SELECT indexsize, estimated_tuples INTO _indexsize_before, _estimated_tuples
-  FROM index_watch._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
+  FROM index_pilot._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
   WHERE indisvalid IS TRUE;
   --index doesn't exist anymore
   IF NOT FOUND THEN
@@ -834,7 +834,7 @@ BEGIN
 
   -- Fire-and-forget mode: REINDEX is running asynchronously
   -- Log the start of reindex operation immediately
-  INSERT INTO index_watch.reindex_history (
+  INSERT INTO index_pilot.reindex_history (
     datname, schemaname, relname, indexrelname,
     indexsize_before, indexsize_after, estimated_tuples, reindex_duration, analyze_duration,
     entry_timestamp
@@ -855,16 +855,16 @@ LANGUAGE plpgsql STRICT;
 
 
 
-CREATE OR REPLACE PROCEDURE index_watch.do_reindex(_datname name, _schemaname name, _relname name, _indexrelname name, _force BOOLEAN DEFAULT FALSE)
+CREATE OR REPLACE PROCEDURE index_pilot.do_reindex(_datname name, _schemaname name, _relname name, _indexrelname name, _force BOOLEAN DEFAULT FALSE)
 AS
 $BODY$
 DECLARE
   _index RECORD;
 BEGIN
-  PERFORM index_watch._check_structure_version();
+  PERFORM index_pilot._check_structure_version();
 
   IF _datname = ANY(dblink_get_connections()) IS NOT TRUE THEN
-    PERFORM index_watch._dblink_connect_if_not(_datname);
+    PERFORM index_pilot._dblink_connect_if_not(_datname);
   END IF;
   FOR _index IN
     SELECT datname, schemaname, relname, indexrelname, indexsize, estimated_bloat
@@ -872,7 +872,7 @@ BEGIN
     -- force switch mean ignore index_rebuild_scale_factor and reindex all suitable indexes
     -- indexes too small (less than index_size_threshold) or manually set to skip in config will be ignored even with force switch
     -- todo: think about it someday
-    FROM index_watch.get_index_bloat_estimates(_datname)
+    FROM index_pilot.get_index_bloat_estimates(_datname)
     WHERE
       (_schemaname IS NULL OR schemaname=_schemaname)
       AND
@@ -883,18 +883,18 @@ BEGIN
       (_force OR
           (
             --skip too small indexes to have any interest
-            indexsize >= pg_size_bytes(index_watch.get_setting(datname, schemaname, relname, indexrelname, 'index_size_threshold'))
+            indexsize >= pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'index_size_threshold'))
             --skip indexes set to skip
-            AND index_watch.get_setting(datname, schemaname, relname, indexrelname, 'skip')::boolean IS DISTINCT FROM TRUE
-            -- AND index_watch.get_setting (for future configurability)
+            AND index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'skip')::boolean IS DISTINCT FROM TRUE
+            -- AND index_pilot.get_setting (for future configurability)
             AND (
                   estimated_bloat IS NULL
-                  OR estimated_bloat >= index_watch.get_setting(datname, schemaname, relname, indexrelname, 'index_rebuild_scale_factor')::float
+                  OR estimated_bloat >= index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'index_rebuild_scale_factor')::float
             )
           )
       )
     LOOP
-       INSERT INTO index_watch.current_processed_index(
+       INSERT INTO index_pilot.current_processed_index(
           datname,
           schemaname,
           relname,
@@ -907,9 +907,9 @@ BEGIN
           _index.indexrelname
        );
        
-       PERFORM index_watch._reindex_index(_index.datname, _index.schemaname, _index.relname, _index.indexrelname);
+       PERFORM index_pilot._reindex_index(_index.datname, _index.schemaname, _index.relname, _index.indexrelname);
        
-       DELETE FROM index_watch.current_processed_index
+       DELETE FROM index_pilot.current_processed_index
        WHERE
           datname=_index.datname AND
           schemaname=_index.schemaname AND
@@ -922,33 +922,33 @@ $BODY$
 LANGUAGE plpgsql;
 
 
---user callable shell over index_watch._record_indexes_info(...  _force_populate=>TRUE)
+--user callable shell over index_pilot._record_indexes_info(...  _force_populate=>TRUE)
 --use to populate index bloa info from current state without reindexing
-CREATE OR REPLACE FUNCTION index_watch.do_force_populate_index_stats(_datname name, _schemaname name, _relname name, _indexrelname name)
+CREATE OR REPLACE FUNCTION index_pilot.do_force_populate_index_stats(_datname name, _schemaname name, _relname name, _indexrelname name)
 RETURNS VOID
 AS
 $BODY$
 BEGIN
-  PERFORM index_watch._check_structure_version();
-  PERFORM index_watch._dblink_connect_if_not(_datname);
-  PERFORM index_watch._record_indexes_info(_datname, _schemaname, _relname, _indexrelname, _force_populate=>TRUE);
+  PERFORM index_pilot._check_structure_version();
+  PERFORM index_pilot._dblink_connect_if_not(_datname);
+  PERFORM index_pilot._record_indexes_info(_datname, _schemaname, _relname, _indexrelname, _force_populate=>TRUE);
   RETURN;
 END;
 $BODY$
 LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION index_watch._check_lock()
+CREATE OR REPLACE FUNCTION index_pilot._check_lock()
 RETURNS bigint AS
 $BODY$
 DECLARE
   _id bigint;
   _is_not_running boolean;
 BEGIN
-  SELECT oid FROM pg_namespace WHERE nspname='index_watch' INTO _id;
+  SELECT oid FROM pg_namespace WHERE nspname='index_pilot' INTO _id;
   SELECT pg_try_advisory_lock(_id) INTO _is_not_running;
   IF NOT _is_not_running THEN
-      RAISE 'The previous launch of the index_watch.periodic is still running.';
+      RAISE 'The previous launch of the index_pilot.periodic is still running.';
   END IF;
   RETURN _id;
 END;
@@ -956,16 +956,16 @@ $BODY$
 LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE PROCEDURE index_watch._cleanup_our_not_valid_indexes() AS
+CREATE OR REPLACE PROCEDURE index_pilot._cleanup_our_not_valid_indexes() AS
 $BODY$
 DECLARE
   _index RECORD;
 BEGIN
   FOR _index IN
     SELECT datname, schemaname, relname, indexrelname FROM
-    index_watch.current_processed_index
+    index_pilot.current_processed_index
   LOOP
-    PERFORM index_watch._dblink_connect_if_not(_index.datname);
+    PERFORM index_pilot._dblink_connect_if_not(_index.datname);
     IF EXISTS (SELECT FROM dblink(_index.datname,
            format(
             $SQL$
@@ -1004,7 +1004,7 @@ BEGIN
       PERFORM dblink(_index.datname, format('DROP INDEX CONCURRENTLY %I.%I_ccnew', _index.schemaname, _index.indexrelname));
       RAISE WARNING 'The invalid index %.%_ccnew was dropped in database %', _index.schemaname, _index.indexrelname, _index.datname;
     END IF;
-    DELETE FROM index_watch.current_processed_index
+    DELETE FROM index_pilot.current_processed_index
        WHERE
           datname=_index.datname AND
           schemaname=_index.schemaname AND
@@ -1017,8 +1017,8 @@ $BODY$
 LANGUAGE plpgsql;
 
 
-DROP PROCEDURE IF EXISTS index_watch.periodic(BOOLEAN);
-CREATE OR REPLACE PROCEDURE index_watch.periodic(real_run BOOLEAN DEFAULT FALSE, force BOOLEAN DEFAULT FALSE) AS
+DROP PROCEDURE IF EXISTS index_pilot.periodic(BOOLEAN);
+CREATE OR REPLACE PROCEDURE index_pilot.periodic(real_run BOOLEAN DEFAULT FALSE, force BOOLEAN DEFAULT FALSE) AS
 $BODY$
 DECLARE
   _datname name;
@@ -1027,58 +1027,72 @@ DECLARE
   _indexrelname name;
   _id bigint;
 BEGIN
-    IF NOT index_watch._check_pg14_version_bugfixed()
+    IF NOT index_pilot._check_pg14_version_bugfixed()
       THEN
-         RAISE 'The database version % affected by PostgreSQL bug BUG #17485 which make use pg_index_watch unsafe, please update to latest minor release. For additional info please see:
+         RAISE 'The database version % affected by PostgreSQL bug BUG #17485 which make use pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
        https://www.postgresql.org/message-id/202205251144.6t4urostzc3s@alvherre.pgsql',
         current_setting('server_version');
     END IF;
-    IF NOT index_watch._check_pg_version_bugfixed()
+    IF NOT index_pilot._check_pg_version_bugfixed()
     THEN
-        RAISE WARNING 'The database version % affected by PostgreSQL bugs which make use pg_index_watch potentially unsafe, please update to latest minor release. For additional info please see:
+        RAISE WARNING 'The database version % affected by PostgreSQL bugs which make use pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
    https://www.postgresql.org/message-id/E1mumI4-0001Zp-PB@gemulon.postgresql.org
    and
    https://www.postgresql.org/message-id/E1n8C7O-00066j-Q5@gemulon.postgresql.org',
       current_setting('server_version');
     END IF;
 
-    SELECT index_watch._check_lock() INTO _id;
-    PERFORM index_watch.check_update_structure_version();
+    SELECT index_pilot._check_lock() INTO _id;
+    PERFORM index_pilot.check_update_structure_version();
 
     -- Managed services mode: process only current database
-    delete from index_watch.reindex_history
+    delete from index_pilot.reindex_history
     where datname = current_database()
     and entry_timestamp < now() - coalesce(
-            index_watch.get_setting(datname, schemaname, relname, indexrelname, 'reindex_history_retention_period')::interval,
+            index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'reindex_history_retention_period')::interval,
             '10 years'::interval
         );
 
     -- Process current database
-    perform index_watch._record_indexes_info(current_database(), null, null, null);
+    perform index_pilot._record_indexes_info(current_database(), null, null, null);
 
     if real_run then
-        call index_watch.do_reindex(current_database(), null, null, null, force);
+        call index_pilot.do_reindex(current_database(), null, null, null, force);
     end if;
 
     -- Complete reindex history records for fire-and-forget operations
     -- Update size_after and reindex_duration for records that have placeholder values
-    UPDATE index_watch.reindex_history 
-    SET 
-        indexsize_after = (
-            SELECT indexsize 
-            FROM index_watch._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
-            WHERE indisvalid IS TRUE
-        ),
-        reindex_duration = now() - entry_timestamp
-    WHERE 
-        datname = current_database()
-        AND indexsize_after = indexsize_before  -- Placeholder values
-        AND entry_timestamp > now() - interval '1 hour'  -- Recent records only
-        AND EXISTS (
-            SELECT 1 
-            FROM index_watch._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
-            WHERE indisvalid IS TRUE
-        );
+    WITH completed_reindexes AS (
+        UPDATE index_pilot.reindex_history 
+        SET 
+            indexsize_after = (
+                SELECT indexsize 
+                FROM index_pilot._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
+                WHERE indisvalid IS TRUE
+            ),
+            reindex_duration = now() - entry_timestamp
+        WHERE 
+            datname = current_database()
+            AND indexsize_after = indexsize_before  -- Placeholder values
+            AND entry_timestamp > now() - interval '1 hour'  -- Recent records only
+            AND EXISTS (
+                SELECT 1 
+                FROM index_pilot._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
+                WHERE indisvalid IS TRUE
+            )
+        RETURNING datname, schemaname, relname, indexrelname, indexsize_after, estimated_tuples
+    )
+    -- Update best_ratio for successfully reindexed indexes
+    UPDATE index_pilot.index_current_state AS ics
+    SET best_ratio = cr.indexsize_after::real / GREATEST(1, cr.estimated_tuples)::real
+    FROM completed_reindexes cr
+    WHERE ics.datname = cr.datname
+      AND ics.schemaname = cr.schemaname
+      AND ics.relname = cr.relname
+      AND ics.indexrelname = cr.indexrelname
+      AND cr.indexsize_after > pg_size_bytes(
+          index_pilot.get_setting(cr.datname, cr.schemaname, cr.relname, cr.indexrelname, 'minimum_reliable_index_size')
+      );
 
     PERFORM pg_advisory_unlock(_id);
 END;
@@ -1086,7 +1100,7 @@ $BODY$
 LANGUAGE plpgsql;
 
 -- Permission check function for managed services mode
-create or replace function index_watch.check_permissions()
+create or replace function index_pilot.check_permissions()
 returns table(permission text, status boolean) as
 $BODY$
 begin
@@ -1144,7 +1158,7 @@ begin
     raise notice '';
     raise notice 'Checking permissions...';
 
-    for _perm in select * from index_watch.check_permissions() loop
+    for _perm in select * from index_pilot.check_permissions() loop
         raise notice '  %: %',
                 rpad(_perm.permission, 30),
             case when _perm.status then 'OK' else 'MISSING' end;
@@ -1161,13 +1175,13 @@ begin
     end if;
 
     raise notice '';
-    raise notice 'Usage: call index_watch.periodic(true);  -- true = perform actual reindexing';
+    raise notice 'Usage: call index_pilot.periodic(true);  -- true = perform actual reindexing';
 end $$;
 
 -- Setup functions for FDW + DB-Link configuration (managed services mode)
 
 -- Function to setup foreign server for self-connection
-create or replace function index_watch.setup_fdw_self_connection(
+create or replace function index_pilot.setup_fdw_self_connection(
     _host text default 'localhost',
     _port integer default null,
     _dbname text default null
@@ -1197,7 +1211,7 @@ $BODY$
 language plpgsql;
 
 -- Function to setup user mapping for index_pilot user
-create or replace function index_watch.setup_user_mapping(
+create or replace function index_pilot.setup_user_mapping(
     _username text default null,
     _password text default null
 ) returns text as
@@ -1243,7 +1257,7 @@ $BODY$
 language plpgsql;
 
 -- Check postgres_fdw setup status and permissions  
-create or replace function index_watch.check_fdw_security_status() 
+create or replace function index_pilot.check_fdw_security_status() 
 returns table(component text, status text, details text) as
 $BODY$
 begin
@@ -1301,7 +1315,7 @@ language plpgsql;
 
 -- Setup secure connection using postgres_fdw USER MAPPING ONLY
 -- Secure approach: password provided once via CREATE USER MAPPING
-CREATE OR REPLACE FUNCTION index_watch.setup_rds_connection(_host text, _port integer DEFAULT 5432, _username text DEFAULT 'index_pilot', _password text DEFAULT NULL)
+CREATE OR REPLACE FUNCTION index_pilot.setup_rds_connection(_host text, _port integer DEFAULT 5432, _username text DEFAULT 'index_pilot', _password text DEFAULT NULL)
 RETURNS text
 AS
 $BODY$
@@ -1334,10 +1348,10 @@ NOTE: This follows security best practices to use ONLY postgres_fdw USER MAPPING
     END IF;
     
     -- Setup FDW foreign server
-    SELECT index_watch.setup_fdw_self_connection(_host, _port, null) INTO _setup_result;
+    SELECT index_pilot.setup_fdw_self_connection(_host, _port, null) INTO _setup_result;
     
     -- Setup USER MAPPING with password (stored securely in PostgreSQL catalog)
-    SELECT index_watch.setup_user_mapping(_username, _password) INTO _setup_result;
+    SELECT index_pilot.setup_user_mapping(_username, _password) INTO _setup_result;
     
     -- Test the secure FDW connection
     BEGIN
@@ -1352,7 +1366,7 @@ $BODY$
 LANGUAGE plpgsql;
 
 -- Convenience function to setup complete FDW configuration
-create or replace function index_watch.setup_fdw_complete(
+create or replace function index_pilot.setup_fdw_complete(
     _password text,
     _host text default 'localhost',
     _port integer default null,
@@ -1363,15 +1377,15 @@ declare
     _setup_result text;
 begin
     -- Step 1: Setup foreign server
-    select index_watch.setup_fdw_self_connection(_host, _port, null) into _setup_result;
+    select index_pilot.setup_fdw_self_connection(_host, _port, null) into _setup_result;
     return query select 'Foreign Server'::text, _setup_result;
     
     -- Step 2: Setup user mapping
-    select index_watch.setup_user_mapping(_username, _password) into _setup_result;
+    select index_pilot.setup_user_mapping(_username, _password) into _setup_result;
     return query select 'User Mapping'::text, _setup_result;
     
     -- Step 3: Setup connection parameters
-    select index_watch.setup_rds_connection(_host, _port, coalesce(_username, 'index_pilot'), _password) into _setup_result;
+    select index_pilot.setup_rds_connection(_host, _port, coalesce(_username, 'index_pilot'), _password) into _setup_result;
     return query select 'Connection Setup'::text, _setup_result;
     
     -- Step 4: Test connection
@@ -1387,7 +1401,7 @@ $BODY$
 language plpgsql;
 
 -- Function to check FDW configuration status
-create or replace function index_watch.check_fdw_status()
+create or replace function index_pilot.check_fdw_status()
 returns table(component text, status text, details text) as
 $BODY$
 begin
@@ -1407,7 +1421,7 @@ begin
                 then 'OK' else 'MISSING' end::text,
            case when exists (select 1 from pg_foreign_server where srvname = 'index_pilot_self') 
                 then 'Server index_pilot_self exists'
-                else 'Run: SELECT index_watch.setup_fdw_self_connection();' end::text;
+                else 'Run: SELECT index_pilot.setup_fdw_self_connection();' end::text;
     
     -- Check user mapping
     return query
@@ -1420,7 +1434,7 @@ begin
                select 1 from pg_user_mappings 
                where srvname = 'index_pilot_self' and usename = current_user
            ) then format('Mapping exists for user %s', current_user)
-           else format('Run: SELECT index_watch.setup_user_mapping(''%s'', ''your_password'');', current_user) end::text;
+           else format('Run: SELECT index_pilot.setup_user_mapping(''%s'', ''your_password'');', current_user) end::text;
 end;
 $BODY$
 language plpgsql;

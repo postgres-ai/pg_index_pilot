@@ -10,7 +10,7 @@ The Roadmap covers three big areas:
 
 1. [ ] **"AR":** Automated Reindexing
     1. [x] Maxim Boguk's bloat estimation formula – works with *any* type of index, not only btree
-        1. [x] original implementation (`pg_index_watch`) – requires initial full reindex
+        1. [x] original implementation (`pg_index_pilot`) – requires initial full reindex
         2. [x] non-superuser mode for cloud databases (AWS RDS, Google Cloud SQL, Azure)
         3. [x] flexible connection management for dblink
         4. [ ] API for stats obtained on a clone (to avoid full reindex on prod primary)
@@ -89,7 +89,7 @@ Cons:
 
 ---
 
-=== pg_index_watch original README (polished) ===
+=== pg_index_pilot original README (polished) ===
 
 
 ## Requirements
@@ -119,7 +119,7 @@ git clone https://github.com/dataegret/pg_index_pilot
 cd pg_index_pilot
 
 # 1. Setup the index_pilot user (as admin user)
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database -f setup_index_pilot_user.sql
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database -f setup_01_user.psql
 
 # 2. Grant additional permissions if needed (managed services only)
 # For RDS/Cloud SQL, you may need:
@@ -128,13 +128,13 @@ psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database -f s
 
 # 3. Install the system (as index_pilot user)  
 export PGPASSWORD='your_secure_password'
-psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_database -f install_as_index_pilot.psql
+psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_database -f setup_02_tooling.psql
 
 # 4. Configure secure FDW connection (as index_pilot user)
 psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_database \
-  -c "SELECT index_watch.setup_fdw_self_connection('your-hostname', 5432, 'your_database');"
+  -c "SELECT index_pilot.setup_fdw_self_connection('your-hostname', 5432, 'your_database');"
 psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_database \
-  -c "SELECT index_watch.setup_user_mapping('index_pilot', 'your_secure_password');"
+  -c "SELECT index_pilot.setup_user_mapping('index_pilot', 'your_secure_password');"
 
 # 5. Create additional USER MAPPING (required for RDS/Cloud SQL)
 # For RDS/Cloud SQL, admin users need mapping:
@@ -154,17 +154,17 @@ git clone https://github.com/dataegret/pg_index_pilot
 cd pg_index_pilot
 
 # 1. Setup the index_pilot user (as superuser)
-psql -U postgres -d your_database -f setup_index_pilot_user.sql
+psql -U postgres -d your_database -f setup_01_user.psql
 
 # 2. Install the system (as index_pilot user)  
 export PGPASSWORD='your_secure_password'
-psql -U index_pilot -d your_database -f install_as_index_pilot.psql
+psql -U index_pilot -d your_database -f setup_02_tooling.psql
 
 # 3. Configure secure FDW connection (as index_pilot user)
 psql -U index_pilot -d your_database \
-  -c "SELECT index_watch.setup_fdw_self_connection('localhost', 5432, 'your_database');"
+  -c "SELECT index_pilot.setup_fdw_self_connection('localhost', 5432, 'your_database');"
 psql -U index_pilot -d your_database \
-  -c "SELECT index_watch.setup_user_mapping('index_pilot', 'your_secure_password');"
+  -c "SELECT index_pilot.setup_user_mapping('index_pilot', 'your_secure_password');"
 ```
 
 ## Initial launch
@@ -180,7 +180,7 @@ export PGPASSWORD='your_index_pilot_password'
 
 # Run initial analysis and reindexing
 nohup psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_database \
-  -qXt -c "call index_watch.periodic(true)" >> index_watch.log 2>&1
+  -qXt -c "call index_pilot.periodic(true)" >> index_pilot.log 2>&1
 ```
 
 ## Scheduling automated maintenance
@@ -195,7 +195,7 @@ CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- Schedule nightly reindexing at 2 AM  
 SELECT cron.schedule('index-maintenance', '0 2 * * *', 
-    'CALL index_watch.periodic(true);'
+    'CALL index_pilot.periodic(true);'
 );
 ```
 
@@ -204,7 +204,7 @@ SELECT cron.schedule('index-maintenance', '0 2 * * *',
 Create a maintenance script:
 ```cron
 # Runs reindexing only on primary (all databases)
-00 00 * * *   psql -d postgres -AtqXc "select not pg_is_in_recovery()" | grep -qx t || exit; psql -d postgres -qt -c "call index_watch.periodic(true);"
+00 00 * * *   psql -d postgres -AtqXc "select not pg_is_in_recovery()" | grep -qx t || exit; psql -d postgres -qt -c "call index_pilot.periodic(true);"
 ```
 
 Add to crontab:
@@ -227,7 +227,7 @@ cd pg_index_pilot
 git pull
 
 # Reload the updated functions (or reinstall completely)
-psql -1 -d your_database -f index_watch_functions.sql
+psql -1 -d your_database -f index_pilot_functions.sql
 ```
 
 ## Monitoring and Analysis
@@ -241,7 +241,7 @@ select
     pg_size_pretty(indexsize_after::bigint) as size_after,
     reindex_duration,
     entry_timestamp
-from index_watch.reindex_history 
+from index_pilot.reindex_history 
 order by entry_timestamp desc 
 limit 20;
 ```
@@ -253,7 +253,7 @@ select
     indexrelname,
     pg_size_pretty(indexsize::bigint) as current_size,
     round(estimated_bloat::numeric, 1)||'x' as bloat_now
-from index_watch.get_index_bloat_estimates(current_database()) 
+from index_pilot.get_index_bloat_estimates(current_database()) 
 order by estimated_bloat desc nulls last 
 limit 40;
 ```
@@ -262,10 +262,10 @@ limit 40;
 
 ### Core Functions
 
-#### `index_watch.do_reindex()`
+#### `index_pilot.do_reindex()`
 Manually triggers reindexing for specific objects.
 ```sql
-procedure index_watch.do_reindex(
+procedure index_pilot.do_reindex(
     _datname name, 
     _schemaname name, 
     _relname name, 
@@ -274,10 +274,10 @@ procedure index_watch.do_reindex(
 )
 ```
 
-#### `index_watch.periodic()`
+#### `index_pilot.periodic()`
 Main procedure for automated bloat detection and reindexing.
 ```sql
-procedure index_watch.periodic(
+procedure index_pilot.periodic(
     real_run boolean default false,  -- Execute actual reindexing
     force boolean default false      -- Force all eligible indexes
 )
@@ -285,10 +285,10 @@ procedure index_watch.periodic(
 
 ### Bloat Analysis
 
-#### `index_watch.get_index_bloat_estimates()`
+#### `index_pilot.get_index_bloat_estimates()`
 Returns current bloat estimates for all indexes in a database.
 ```sql
-function index_watch.get_index_bloat_estimates(_datname name) 
+function index_pilot.get_index_bloat_estimates(_datname name) 
 returns table(
     datname name, 
     schemaname name, 
@@ -301,10 +301,10 @@ returns table(
 
 ### Non-Superuser Mode Functions
 
-#### `index_watch.check_permissions()`
+#### `index_pilot.check_permissions()`
 Verifies permissions for non-superuser mode operation.
 ```sql
-function index_watch.check_permissions() 
+function index_pilot.check_permissions() 
 returns table(
     permission text, 
     status boolean
@@ -316,7 +316,7 @@ returns table(
 The system uses an optimized "fire-and-forget" approach for `REINDEX CONCURRENTLY`:
 
 **How it works:**
-1. `index_watch._reindex_index()` starts `REINDEX CONCURRENTLY` asynchronously via `dblink_send_query()`
+1. `index_pilot._reindex_index()` starts `REINDEX CONCURRENTLY` asynchronously via `dblink_send_query()`
 2. Function returns immediately without waiting for completion
 3. `REINDEX` continues running in background
 4. No immediate `ANALYZE` or size logging (to avoid conflicts)
@@ -364,7 +364,7 @@ Test the fire-and-forget REINDEX on a small index:
 
 ```sql
 -- Test REINDEX on a specific index
-CALL index_watch.do_reindex(
+CALL index_pilot.do_reindex(
     current_database(),
     'schema_name',
     'table_name', 
@@ -383,7 +383,7 @@ SELECT
     pg_size_pretty(indexsize_after::bigint) as size_after,
     reindex_duration,
     entry_timestamp
-FROM index_watch.reindex_history 
+FROM index_pilot.reindex_history 
 ORDER BY entry_timestamp DESC 
 LIMIT 5;
 ```
@@ -412,7 +412,7 @@ The system uses **secure postgres_fdw USER MAPPING** for password management:
 **How it works:**
 1. **Password provided ONCE** during setup:
    ```sql
-   SELECT index_watch.setup_rds_connection(
+   SELECT index_pilot.setup_rds_connection(
        'your_secure_password',  -- Password provided only here
        'your-instance.region.rds.amazonaws.com',
        5432,
@@ -423,7 +423,7 @@ The system uses **secure postgres_fdw USER MAPPING** for password management:
 2. **Password stored securely** in PostgreSQL catalog via `CREATE USER MAPPING`
 3. **No password needed** for subsequent operations:
    ```sql
-   CALL index_watch.do_reindex(
+   CALL index_pilot.do_reindex(
        current_database(),
        'schema_name',
        'table_name', 
@@ -443,7 +443,7 @@ The system uses **secure postgres_fdw USER MAPPING** for password management:
 
 **Self-hosted PostgreSQL:**
 ```sql
--- Basic permissions (handled by setup_index_pilot_user.sql)
+-- Basic permissions (handled by setup_01_user.psql)
 GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO index_pilot;
 ```
 
