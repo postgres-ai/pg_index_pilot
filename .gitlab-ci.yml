@@ -144,10 +144,16 @@ test:nonsuperuser:
       POSTGRES_IP=$(PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -d test_index_pilot -tAc "SELECT host(inet_server_addr())" || echo "postgres")
       echo "Using IP for FDW: $POSTGRES_IP"
       
-      # Setup FDW as the index_pilot user
-      PGPASSWORD=testpass psql -h postgres -U index_pilot -d test_index_pilot << EOF
+      # Setup FDW as admin first, then grant to index_pilot
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -d test_index_pilot << EOF
+      -- Create FDW server
       SELECT index_pilot.setup_fdw_self_connection('$POSTGRES_IP', 5432, 'test_index_pilot');
+      -- Create user mapping for postgres (needed for internal functions)
+      SELECT index_pilot.setup_user_mapping('postgres', '$POSTGRES_PASSWORD');
+      -- Create user mapping for index_pilot
       SELECT index_pilot.setup_user_mapping('index_pilot', 'testpass');
+      -- Grant usage on the server to index_pilot
+      GRANT USAGE ON FOREIGN SERVER index_pilot_self TO index_pilot;
       EOF
     - |
       echo "Running non-superuser tests..."
