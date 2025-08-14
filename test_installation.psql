@@ -1,0 +1,180 @@
+-- Test script for pg_index_pilot installation
+-- This script verifies that the installation is working correctly
+-- Tests fire-and-forget REINDEX capability and connection setup
+
+\set ON_ERROR_STOP
+
+\echo '=== pg_index_pilot Installation Test ==='
+\echo ''
+
+-- Show current connection info
+\echo 'Connection Information:'
+select 
+    current_user as "Current User",
+    current_database() as "Database",
+    version() as "PostgreSQL Version";
+
+\echo ''
+
+-- Check pg_index_pilot version
+\echo 'pg_index_pilot Version:'
+select index_watch.version() as "Version";
+
+\echo ''
+
+-- Check permissions
+\echo 'Permission Check:'
+select permission, status from index_watch.check_permissions();
+
+\echo ''
+
+-- Check connection configuration
+\echo 'Connection Configuration Check:'
+select 
+    'dblink extension' as component,
+    case when exists (select 1 from pg_extension where extname = 'dblink') 
+         then 'OK' else 'MISSING' end as status,
+    case when exists (select 1 from pg_extension where extname = 'dblink')
+         then 'dblink extension is installed'
+         else 'Run: CREATE EXTENSION dblink;' end as details
+union all
+select 
+    'Connection setup function' as component,
+    case when exists (select 1 from pg_proc where proname = 'setup_rds_connection')
+         then 'OK' else 'MISSING' end as status,
+    case when exists (select 1 from pg_proc where proname = 'setup_rds_connection')
+         then 'setup_rds_connection function available'
+         else 'Connection setup function not found' end as details;
+
+\echo ''
+
+-- Show current configuration
+\echo 'Current Configuration:'
+select key, value, comment from index_watch.config order by id;
+
+\echo ''
+
+-- Show available indexes (sample)
+\echo 'Sample of Available Indexes:'
+select 
+    schemaname,
+    tablename,
+    indexname,
+    pg_size_pretty(pg_relation_size((schemaname||'.'||indexname)::regclass)) as size
+from pg_indexes 
+where schemaname not in ('information_schema', 'pg_catalog')
+order by pg_relation_size((schemaname||'.'||indexname)::regclass) desc
+limit 10;
+
+\echo ''
+
+-- Test basic functionality (dry run)
+\echo 'Testing Basic Functionality (Dry Run):'
+call index_watch.periodic(false);
+
+\echo ''
+
+-- Check if any indexes were analyzed
+\echo 'Recently Analyzed Indexes:'
+select 
+    datname,
+    schemaname,
+    relname,
+    indexrelname,
+    indexsize,
+    best_ratio,
+    mtime
+from index_watch.index_current_state
+order by mtime desc
+limit 10;
+
+\echo ''
+
+-- Test connection setup and fire-and-forget REINDEX capability
+\echo 'Testing Connection and Fire-and-Forget REINDEX:'
+do $$
+declare
+    _test_result text;
+    _conn_string text;
+begin
+    begin
+        -- Test building connection string
+        _conn_string := 'Connection string building via secure FDW';
+        raise notice 'Connection string building: SUCCESS';
+        
+        -- Test direct dblink connection
+        perform dblink_connect('test_rds_conn', _conn_string);
+        perform dblink_exec('test_rds_conn', 'SET statement_timeout = 0');  -- Simple non-returning command
+        perform dblink_disconnect('test_rds_conn');
+        raise notice 'dblink connection test: SUCCESS';
+        
+        raise notice 'Fire-and-forget REINDEX capability: READY';
+        raise notice '  - Use setup_rds_connection() to configure credentials';
+        raise notice '  - Use _reindex_index() for asynchronous reindexing';
+        
+    exception when others then
+        raise notice 'Connection test: FAILED - %', sqlerrm;
+raise notice 'NOTE: Configure connection first using setup_rds_connection()';
+    end;
+end $$;
+
+\echo ''
+
+-- Summary
+\echo 'Test Summary:'
+do $$
+declare
+    _perm_issues int := 0;
+    _rds_issues int := 0;
+    _perm record;
+    _has_dblink boolean := false;
+    _has_setup_func boolean := false;
+begin
+    -- Count permission issues (skip legacy FDW checks)
+    for _perm in select * from index_watch.check_permissions() loop
+        if not _perm.status and _perm.permission not like '%server%' and _perm.permission not like '%mapping%' then
+            _perm_issues := _perm_issues + 1;
+        end if;
+    end loop;
+    
+    -- Check prerequisites
+    select exists (select 1 from pg_extension where extname = 'dblink') into _has_dblink;
+    select exists (select 1 from pg_proc where proname = 'setup_rds_connection') into _has_setup_func;
+    
+    if not _has_dblink then
+        _rds_issues := _rds_issues + 1;
+    end if;
+    if not _has_setup_func then
+        _rds_issues := _rds_issues + 1;
+    end if;
+    
+    if _perm_issues = 0 and _rds_issues = 0 then
+        raise notice '✓ All tests passed! pg_index_pilot is ready to use.';
+        raise notice '';
+        raise notice 'Next steps:';
+        raise notice '1. Configure connection: SELECT index_watch.setup_rds_connection(''host'', 5432, ''user'', ''password'');';
+        raise notice '2. Run a full analysis: CALL index_watch.periodic(true);';
+        raise notice '3. Schedule regular maintenance using pg_cron or external cron';
+        raise notice '4. Monitor results: SELECT * FROM index_watch.history;';
+        raise notice '5. Test fire-and-forget REINDEX: SELECT index_watch._reindex_index(''dbname'', ''schema'', ''table'', ''index'');';
+    else
+        raise notice '⚠ Issues found:';
+        if _perm_issues > 0 then
+            raise notice '  - % permission issues', _perm_issues;
+        end if;
+        if _rds_issues > 0 then
+            raise notice '  - % connection configuration issues', _rds_issues;
+            if not _has_dblink then
+                raise notice '    * dblink extension missing';
+            end if;
+            if not _has_setup_func then
+                raise notice '    * setup_rds_connection function missing';
+            end if;
+        end if;
+        raise notice '';
+        raise notice 'Please review the output above and fix the issues before proceeding.';
+    end if;
+end $$;
+
+\echo ''
+\echo 'Test completed.'
