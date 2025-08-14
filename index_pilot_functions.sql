@@ -790,13 +790,19 @@ declare
   _indexrelid oid;
   _datid oid;
   _indisvalid boolean;
+  _conn_name text := 'reindex_' || md5(_schemaname || '.' || _indexrelname || now()::text);
 begin
-  -- Establish secure dblink connection via FDW (always recreate for reliability)
+  -- Establish secure dblink connection via FDW
+  -- Use unique connection name to avoid disconnecting other async operations
   begin
-    perform index_pilot._connect_securely(_datname);
-    raise notice 'Created secure FDW connection: %', _datname;
+    -- Connect using unique name for this specific reindex
+    if _conn_name = any(dblink_get_connections()) then
+      perform dblink_disconnect(_conn_name);
+    end if;
+    perform dblink_connect_u(_conn_name, 'index_pilot_self');
+    raise notice 'Created secure FDW connection: % for %.%', _conn_name, _schemaname, _indexrelname;
   exception when others then
-    raise exception 'Failed to create secure FDW connection "%": %', _datname, SQLERRM;
+    raise exception 'Failed to create secure FDW connection: %', SQLERRM;
   end;
 
   --raise notice 'working with %.%.% %', _datname, _schemaname, _relname, _indexrelname;
@@ -815,19 +821,23 @@ begin
   _timestamp := pg_catalog.clock_timestamp ();
   
   -- Simple async reindex concurrently (fire-and-forget)
-  if dblink_send_query(_datname, 'reindex index concurrently '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_indexrelname)) = 1 then
+  if dblink_send_query(_conn_name, 'reindex index concurrently '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_indexrelname)) = 1 then
     raise notice 'reindex concurrently %.% started successfully (async)', _schemaname, _indexrelname;
     
     -- Simple check - is it still busy immediately?
-    if dblink_is_busy(_datname) = 1 then
+    if dblink_is_busy(_conn_name) = 1 then
       raise notice 'reindex %.% is running in background', _schemaname, _indexrelname;
+      -- Leave connection open for async operation to continue
     else
       -- Quick completion, get result
-      perform dblink_get_result(_datname);
+      perform dblink_get_result(_conn_name);
       raise notice 'reindex concurrently %.% completed quickly', _schemaname, _indexrelname;
+      -- Can disconnect since it's done
+      perform dblink_disconnect(_conn_name);
     end if;
   else
     raise notice 'Failed to send async reindex for %.% - please execute manually: reindex index concurrently %.%;', _schemaname, _indexrelname, _schemaname, _indexrelname;
+    perform dblink_disconnect(_conn_name);
   end if;
 
   _reindex_duration := pg_catalog.clock_timestamp ()-_timestamp;
