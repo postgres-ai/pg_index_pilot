@@ -164,11 +164,27 @@ elif [ -d "." ] && [ -f "01_basic_installation.sql" ]; then
     TEST_DIR="."
 else
     echo -e "${RED}Error: Cannot find test files${NC}"
+    echo "Current directory: $(pwd)"
+    echo "Files in current directory:"
+    ls -la
+    if [ -d "test" ]; then
+        echo "Files in test directory:"
+        ls -la test/
+    fi
     exit 1
 fi
 
+echo "Using test directory: $TEST_DIR"
+echo "Test files found:"
+ls -la "$TEST_DIR"/*.sql 2>/dev/null || echo "No .sql files found in $TEST_DIR"
+
 # Initialize JUnit XML output
-JUNIT_FILE="test-results.xml"
+# Always create in test/ directory for CI artifact collection
+if [ -d "test" ] && [ "$TEST_DIR" = "test" ]; then
+    JUNIT_FILE="test/test-results.xml"
+else
+    JUNIT_FILE="test-results.xml"
+fi
 echo '<?xml version="1.0" encoding="UTF-8"?>' > "$JUNIT_FILE"
 echo '<testsuites name="pg_index_pilot" tests="0" failures="0" time="0">' >> "$JUNIT_FILE"
 echo '  <testsuite name="index_pilot_tests">' >> "$JUNIT_FILE"

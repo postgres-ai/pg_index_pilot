@@ -35,9 +35,9 @@ variables:
       PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT version();"
     - |
       echo "Running test suite..."
-      cd test
-      chmod +x run_tests.sh
-      ./run_tests.sh -h postgres -u postgres -w "$POSTGRES_PASSWORD" -d test_index_pilot
+      chmod +x test/run_tests.sh
+      # Run from root directory so SQL files can be found
+      ./test/run_tests.sh -h postgres -u postgres -w "$POSTGRES_PASSWORD" -d test_index_pilot
   allow_failure: false
   artifacts:
     reports:
@@ -126,9 +126,8 @@ test:nonsuperuser:
       PGPASSWORD=testpass psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_functions.sql
     - |
       echo "Running non-superuser tests..."
-      cd test
-      chmod +x run_tests.sh
-      SKIP_INSTALL=true ./run_tests.sh -h postgres -u index_pilot -w testpass -d test_index_pilot
+      chmod +x test/run_tests.sh
+      SKIP_INSTALL=true ./test/run_tests.sh -h postgres -u index_pilot -w testpass -d test_index_pilot
   tags:
     - docker
   allow_failure: false
