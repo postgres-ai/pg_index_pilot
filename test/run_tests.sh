@@ -2,7 +2,8 @@
 # Test runner for pg_index_pilot
 # Can be used locally or in CI/CD pipelines
 
-set -e  # Exit on error
+# Don't use set -e as we need to handle test failures gracefully
+set -o pipefail  # Still fail on pipe errors
 
 # Default values
 DB_HOST="${DB_HOST:-localhost}"
@@ -58,8 +59,7 @@ if [ -n "$DB_PASS" ]; then
     export PGPASSWORD="$DB_PASS"
 fi
 
-# Connection string
-PSQL="psql -h $DB_HOST -p $DB_PORT -U $DB_USER -X"
+# Connection parameters are used directly in commands
 
 echo "========================================"
 echo "pg_index_pilot Test Suite"
@@ -74,7 +74,7 @@ run_sql() {
     local file=$1
     local description=$2
     echo -e "${YELLOW}Running: $description${NC}"
-    if $PSQL -d "$DB_NAME" -f "$file" > /tmp/test_output.log 2>&1; then
+    if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -f "$file" > /tmp/test_output.log 2>&1; then
         echo -e "${GREEN}✓ $description passed${NC}"
         return 0
     else
@@ -87,7 +87,7 @@ run_sql() {
 
 # Check PostgreSQL version
 echo "Checking PostgreSQL version..."
-PG_VERSION=$($PSQL -d postgres -tAc "SELECT current_setting('server_version_num')::int")
+PG_VERSION=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d postgres -tAc "SELECT current_setting('server_version_num')::int" || echo "0")
 if [ "$PG_VERSION" -lt 130000 ]; then
     echo -e "${RED}Error: PostgreSQL 13 or higher required (found: $PG_VERSION)${NC}"
     exit 1
@@ -98,8 +98,11 @@ echo ""
 # Create test database
 if [ "$SKIP_INSTALL" != "true" ]; then
     echo "Setting up test database..."
-    $PSQL -d postgres -c "DROP DATABASE IF EXISTS $DB_NAME" 2>/dev/null || true
-    $PSQL -d postgres -c "CREATE DATABASE $DB_NAME"
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d postgres -c "DROP DATABASE IF EXISTS $DB_NAME" 2>/dev/null || true
+    if ! psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d postgres -c "CREATE DATABASE $DB_NAME"; then
+        echo -e "${RED}Error: Failed to create database $DB_NAME${NC}"
+        exit 1
+    fi
     echo -e "${GREEN}✓ Database created${NC}"
     echo ""
     
@@ -107,11 +110,11 @@ if [ "$SKIP_INSTALL" != "true" ]; then
     echo "Installing pg_index_pilot..."
     
     # Create extensions
-    $PSQL -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS dblink"
-    $PSQL -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS postgres_fdw"
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS dblink"
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS postgres_fdw"
     
     # Setup FDW for testing (if possible)
-    $PSQL -d "$DB_NAME" -c "
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d "$DB_NAME" -c "
         DO \$\$
         BEGIN
             -- Try to create foreign server for self-connection
@@ -131,11 +134,23 @@ if [ "$SKIP_INSTALL" != "true" ]; then
     
     # Install schema and functions
     if [ -f "index_pilot_tables.sql" ]; then
-        run_sql "index_pilot_tables.sql" "Schema installation"
-        run_sql "index_pilot_functions.sql" "Functions installation"
+        if ! run_sql "index_pilot_tables.sql" "Schema installation"; then
+            echo -e "${RED}Error: Schema installation failed${NC}"
+            exit 1
+        fi
+        if ! run_sql "index_pilot_functions.sql" "Functions installation"; then
+            echo -e "${RED}Error: Functions installation failed${NC}"
+            exit 1
+        fi
     elif [ -f "../index_pilot_tables.sql" ]; then
-        run_sql "../index_pilot_tables.sql" "Schema installation"
-        run_sql "../index_pilot_functions.sql" "Functions installation"
+        if ! run_sql "../index_pilot_tables.sql" "Schema installation"; then
+            echo -e "${RED}Error: Schema installation failed${NC}"
+            exit 1
+        fi
+        if ! run_sql "../index_pilot_functions.sql" "Functions installation"; then
+            echo -e "${RED}Error: Functions installation failed${NC}"
+            exit 1
+        fi
     else
         echo -e "${RED}Error: Cannot find installation files${NC}"
         exit 1
@@ -201,7 +216,9 @@ fi
 
 echo "Running $(echo "$TEST_FILES" | wc -l) test files..."
 
+IFS=$'\n'  # Set Internal Field Separator to newline for the loop
 for test_file in $TEST_FILES; do
+    echo "Processing: $test_file"
     if [ -f "$test_file" ]; then
         test_name=$(basename "$test_file" .sql)
         TEST_START=$(date +%s)
@@ -220,8 +237,11 @@ for test_file in $TEST_FILES; do
             echo "      <failure message=\"Test failed\">$ERROR_MSG</failure>" >> "$JUNIT_FILE"
             echo "    </testcase>" >> "$JUNIT_FILE"
         fi
+    else
+        echo "Warning: File not found: $test_file"
     fi
 done
+unset IFS  # Reset IFS
 
 END_TIME=$(date +%s)
 TOTAL_TIME=$((END_TIME - START_TIME))
@@ -251,7 +271,7 @@ echo ""
 # Cleanup
 if [ "$SKIP_INSTALL" != "true" ]; then
     echo "Cleaning up..."
-    $PSQL -d postgres -c "DROP DATABASE IF EXISTS $DB_NAME" 2>/dev/null || true
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -X -d postgres -c "DROP DATABASE IF EXISTS $DB_NAME" 2>/dev/null || true
     echo -e "${GREEN}✓ Cleanup complete${NC}"
 fi
 
