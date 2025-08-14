@@ -1080,6 +1080,14 @@ begin
                 from index_pilot._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
                 where indisvalid is true
             )
+            -- Don't update if a _ccnew index exists (REINDEX CONCURRENTLY still in progress)
+            and not exists (
+                select 1 
+                from pg_class c
+                join pg_namespace n on c.relnamespace = n.oid
+                where n.nspname = schemaname
+                and c.relname ~ ('^' || indexrelname || '_ccnew[0-9]*$')
+            )
         RETURNING datname, schemaname, relname, indexrelname, indexsize_after, estimated_tuples
     )
     -- Update best_ratio for successfully reindexed indexes
