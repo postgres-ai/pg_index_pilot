@@ -816,18 +816,18 @@ begin
   
   -- Simple async reindex concurrently (fire-and-forget)
   if dblink_send_query(_datname, 'reindex index concurrently '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_indexrelname)) = 1 then
-    raise notice 'reindex concurrently %I.%I started successfully (async)', _schemaname, _indexrelname;
+    raise notice 'reindex concurrently %.% started successfully (async)', _schemaname, _indexrelname;
     
     -- Simple check - is it still busy immediately?
     if dblink_is_busy(_datname) = 1 then
-      raise notice 'reindex %I.%I is running in background', _schemaname, _indexrelname;
+      raise notice 'reindex %.% is running in background', _schemaname, _indexrelname;
     else
       -- Quick completion, get result
       perform dblink_get_result(_datname);
-      raise notice 'reindex concurrently %I.%I completed quickly', _schemaname, _indexrelname;
+      raise notice 'reindex concurrently %.% completed quickly', _schemaname, _indexrelname;
     end if;
   else
-    raise notice 'Failed to send async reindex for %I.%I - please execute manually: reindex index concurrently %I.%I;', _schemaname, _indexrelname, _schemaname, _indexrelname;
+    raise notice 'Failed to send async reindex for %.% - please execute manually: reindex index concurrently %.%;', _schemaname, _indexrelname, _schemaname, _indexrelname;
   end if;
 
   _reindex_duration := pg_catalog.clock_timestamp ()-_timestamp;
@@ -844,7 +844,7 @@ begin
     now()
   );
   
-  raise notice 'reindex STARTED: %I.%I (fire-and-forget mode) - size before: %s', 
+  raise notice 'reindex STARTED: %.% (fire-and-forget mode) - size before: %', 
     _schemaname, _indexrelname, pg_size_pretty(_indexsize_before);
   
   -- The actual reindex completion and final size will be detected by periodic monitoring
