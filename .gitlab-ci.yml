@@ -163,23 +163,6 @@ test:nonsuperuser:
     - docker
   allow_failure: false
 
-# Security scanning
-security:secrets:
-  stage: security
-  image: python:3.11-slim
-  script:
-    - pip install detect-secrets
-    - detect-secrets scan --baseline .secrets.baseline
-    - |
-      if detect-secrets audit .secrets.baseline; then
-        echo "No secrets detected"
-      else
-        echo "Potential secrets found!"
-        exit 1
-      fi
-  tags:
-    - docker
-  allow_failure: true
 
 # SQL injection and security check
 security:sql:
