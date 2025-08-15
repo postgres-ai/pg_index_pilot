@@ -8,11 +8,14 @@ drop schema if exists index_pilot cascade;
 -- 2. Drop the FDW server and user mappings if they exist
 drop server if exists index_pilot_self cascade;
 
--- 3. Clean up any leftover invalid indexes from failed reindexes
--- Generate commands to drop _ccnew* indexes (run these manually)
+-- 3. Note about invalid indexes
+-- Invalid _ccnew* indexes might exist from failed REINDEX operations
+-- These could be from pg_index_pilot OR from manual operations
+-- To list them (but NOT automatically drop):
 do $$
 declare
     r record;
+    count int := 0;
 begin
     for r in 
         select n.nspname, i.relname 
@@ -22,8 +25,15 @@ begin
         where i.relname ~ '_ccnew[0-9]*$'
         and not idx.indisvalid
     loop
-        raise notice 'Run manually: drop index concurrently if exists %.%;', r.nspname, r.relname;
+        count := count + 1;
+        raise notice 'Found invalid index (review before dropping): %.%', r.nspname, r.relname;
     end loop;
+    
+    if count > 0 then
+        raise notice '---';
+        raise notice 'Found % invalid _ccnew indexes. Review and drop manually if needed.', count;
+        raise notice 'To drop: DROP INDEX CONCURRENTLY IF EXISTS schema.index_name;';
+    end if;
 end $$;
 
 -- Note: postgres_fdw extension is not removed as it may be used by other applications
