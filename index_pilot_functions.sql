@@ -802,7 +802,6 @@ begin
   --raise notice 'working with %.%.% %', _datname, _schemaname, _relname, _indexrelname;
 
   --get initial actual index size and verify that the index indeed exists in the target database
-  --PS: english articles are driving me mad periodically
   select indexsize, estimated_tuples into _indexsize_before, _estimated_tuples
   from index_pilot._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
   where indisvalid is true;
@@ -979,7 +978,7 @@ $BODY$
 language plpgsql;
 
 
---user callable shell over index_pilot._record_indexes_info(...  _force_populate=>true)
+--user callable shell over index_pilot._record_indexes_info(... _force_populate=>true)
 --use to populate index bloa info from current state without reindexing
 create or replace function index_pilot.do_force_populate_index_stats(_datname name, _schemaname name, _relname name, _indexrelname name)
 returns void
