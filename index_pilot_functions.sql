@@ -292,6 +292,8 @@ begin
       and a.amname not in ('brin') and x.indislive
       -- skip indexes on temp relations
       and c.relpersistence<>'t'
+      -- skip _ccnew indexes (temporary indexes from REINDEX CONCURRENTLY)
+      and i.relname !~ '_ccnew[0-9]*\$'
       -- debug only
       -- order by 1,2,3
     $SQL$, _use_toast_tables)
@@ -607,6 +609,8 @@ begin
       and a.amname not in ('brin') and x.indislive
       -- skip indexes on temp relations
       and c.relpersistence<>'t'
+      -- skip _ccnew indexes (temporary indexes from REINDEX CONCURRENTLY)
+      and i.relname !~ '_ccnew[0-9]*\$'
       -- debug only
       -- order by 1,2,3
     $SQL$, _use_toast_tables)
@@ -765,6 +769,9 @@ begin
   (i.indexsize::real/(i.best_ratio*estimated_tuples::real)) as estimated_bloat
   from index_pilot.index_current_state as i
   where i.datid = _datid
+  -- Exclude _ccnew indexes from being considered for reindexing
+  -- These are temporary indexes created by REINDEX CONCURRENTLY
+  and i.indexrelname !~ '_ccnew[0-9]*$'
   -- and indisvalid is true
   -- NULLS FIRST because indexes listed with null in estimated bloat going to be reindexed on next cron run
   -- start from maximum bloated indexes
@@ -900,6 +907,19 @@ begin
           )
       )
     loop
+       -- Skip if another index on the same table is already being processed
+       -- This prevents lock contention when multiple indexes on the same table need reindexing
+       if exists (
+          select 1 from index_pilot.current_processed_index
+          where datname = _index.datname
+            and schemaname = _index.schemaname
+            and relname = _index.relname
+       ) then
+          raise notice 'Skipping %.% - another index on table %.% is already being processed',
+                       _index.schemaname, _index.indexrelname, _index.schemaname, _index.relname;
+          continue;
+       end if;
+
        -- Record what we're working on
        insert into index_pilot.current_processed_index(
           datname,
@@ -1522,6 +1542,13 @@ begin
         set indexsize_after = _new_size,
             reindex_duration = _duration
         where id = _rec.id;
+        
+        -- Clean up the current_processed_index tracking
+        delete from index_pilot.current_processed_index
+        where datname = _rec.datname
+          and schemaname = _rec.schemaname
+          and relname = _rec.relname
+          and indexrelname = _rec.indexrelname;
         
         raise notice 'Updated completed reindex: %.% - size %->%, duration %',
           _rec.schemaname, _rec.indexrelname,
