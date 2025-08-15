@@ -326,27 +326,40 @@ returns table(
 
 ## Fire-and-Forget REINDEX Architecture
 
-The system uses an optimized "fire-and-forget" approach for `REINDEX CONCURRENTLY`:
+The system uses an optimized "fire-and-forget" approach for `REINDEX CONCURRENTLY` that prevents deadlocks while maintaining secure password management through postgres_fdw.
 
 **How it works:**
-1. `index_pilot._reindex_index()` starts `REINDEX CONCURRENTLY` asynchronously via `dblink_send_query()`
-2. Function returns immediately without waiting for completion
-3. `REINDEX` continues running in background
-4. No immediate `ANALYZE` or size logging (to avoid conflicts)
-5. Subsequent monitoring cycles will detect and record the improved index
+1. **Connection Management**: 
+   - dblink connection established via postgres_fdw USER MAPPING (no plain-text passwords)
+   - Connection created in PROCEDURE (not function) so it survives COMMIT statements
+   - Connection kept alive for reuse across multiple indexes
+
+2. **Deadlock Prevention**:
+   - Insert tracking record with NULL values (marks as in-progress)
+   - `COMMIT` to release all locks before starting REINDEX
+   - Start async `REINDEX CONCURRENTLY` via `dblink_send_query()`
+   - `COMMIT` again to release any catalog locks from dblink itself
+   - REINDEX runs in separate transaction via dblink (no lock conflicts)
+
+3. **Progress Tracking**:
+   - Initial record has NULL for `indexsize_after` and `reindex_duration`
+   - Function `update_completed_reindexes()` runs periodically (every 30 min)
+   - Detects completion when no `_ccnew` index exists
+   - Updates NULL values with actual size and duration
 
 **Benefits:**
-- ✅ No function hanging or timeouts
-- ✅ System remains responsive during large reindex operations  
+- ✅ No deadlocks (proper lock management with COMMIT)
+- ✅ No hanging or timeouts (true async operation)
 - ✅ Multiple indexes can be reindexed simultaneously
-- ✅ Optimal for large indexes on managed services (which can take 30+ minutes)
+- ✅ Secure password management via postgres_fdw
+- ✅ Works on managed services (RDS, Cloud SQL, Azure)
 
 **Trade-offs:**
-- ⚠️ No immediate size verification after reindex
-- ⚠️ Results visible only in next monitoring cycle
-- ⚠️ Requires manual checking of background processes if needed
+- ⚠️ Results not immediate (updated by periodic job)
+- ⚠️ Requires PROCEDURE support (PostgreSQL 11+)
+- ⚠️ Needs postgres_fdw for secure connections
 
-This approach is specifically designed for managed PostgreSQL environments where long-running operations must not block the monitoring system.
+This architecture specifically addresses the challenge of running `REINDEX CONCURRENTLY` from within a transaction context while maintaining security and preventing deadlocks.
 
 ## Managed Services Setup
 
