@@ -5,7 +5,7 @@
 -- Check PostgreSQL version
 do $$
 begin
-  if (select setting from pg_settings where name='server_version_num') < '13'
+  if (select setting::int from pg_settings where name='server_version_num') < 130000
   then
     raise 'This library works only for PostgreSQL 13 or higher!';
   end if;
