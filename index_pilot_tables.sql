@@ -33,7 +33,7 @@ create table index_pilot.reindex_history
 create index reindex_history_oid_index on index_pilot.reindex_history(datid, indexrelid);
 create index reindex_history_index on index_pilot.reindex_history(datname, schemaname, relname, indexrelname);
 
---history of index sizes (not really neccessary to keep all this data but very useful for future analyzis of bloat trends
+--history of index sizes (not really necessary to keep all this data but very useful for future analyzis of bloat trends
 create table index_pilot.index_current_state
 (
   id bigserial primary key,
