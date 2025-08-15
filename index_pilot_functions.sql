@@ -1,6 +1,6 @@
 \set ON_ERROR_STOP
 
---disable useless (in this particular case) notice noise
+-- disable useless (in this particular case) notice noise
 set client_min_messages to WARNING;
 
 drop function if exists index_pilot.check_pg_version_bugfixed();
@@ -44,7 +44,7 @@ begin
   else
     if not index_pilot._check_pg_version_bugfixed()
     then
-       raise WARNING 'The database version % is affected by PostgreSQL bugs which make using pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
+       raise warning 'The database version % is affected by PostgreSQL bugs which make using pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
    https://www.postgresql.org/message-id/E1mumI4-0001Zp-PB@gemulon.postgresql.org
    and
    https://www.postgresql.org/message-id/E1n8C7O-00066j-Q5@gemulon.postgresql.org',
@@ -52,7 +52,7 @@ begin
     end if;
     if not index_pilot._check_pg14_version_bugfixed()
       then
-         raise WARNING 'The database version % is affected by PostgreSQL BUG #17485 which makes using pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
+         raise warning 'The database version % is affected by PostgreSQL BUG #17485 which makes using pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
        https://www.postgresql.org/message-id/202205251144.6t4urostzc3s@alvherre.pgsql',
         current_setting('server_version');
     end if;
@@ -63,7 +63,7 @@ end; $$;
 create extension if not exists dblink;
 -- alter extension dblink update;
 
---current version of code
+-- current version of code
 create or replace function index_pilot.version()
 returns text as
 $BODY$
@@ -75,7 +75,7 @@ language plpgsql immutable;
 
 
 
---minimum table structure version required
+-- minimum table structure version required
 create or replace function index_pilot._check_structure_version()
 returns void as
 $BODY$
@@ -111,7 +111,7 @@ $BODY$
 language plpgsql;
 
 
---update table structure version from 1 to 2
+-- update table structure version from 1 to 2
 create or replace function index_pilot._structure_version_1_2()
 returns void as
 $BODY$
@@ -130,7 +130,7 @@ $BODY$
 language plpgsql;
 
 
---update table structure version from 2 to 3
+-- update table structure version from 2 to 3
 create or replace function index_pilot._structure_version_2_3()
 returns void as
 $BODY$
@@ -161,18 +161,18 @@ begin
       order by datname, schemaname, relname, indexrelname, entry_timestamp DESC
     ),
     _all_history_since_reindex as (
-       --last reindexed value
+       -- last reindexed value
        select _last_reindex_values.datname, _last_reindex_values.schemaname, _last_reindex_values.relname, _last_reindex_values.indexrelname, _last_reindex_values.entry_timestamp, _last_reindex_values.estimated_tuples, _last_reindex_values.indexsize
        from _last_reindex_values
        union all
-       --all values since reindex or from start
+       -- all values since reindex or from start
        select index_history.datname, index_history.schemaname, index_history.relname, index_history.indexrelname, index_history.entry_timestamp, index_history.estimated_tuples, index_history.indexsize
        from index_pilot.index_history
        left join _last_reindex_values using (datname, schemaname, relname, indexrelname)
        where index_history.entry_timestamp>=coalesce(_last_reindex_values.entry_timestamp, '-INFINITY'::timestamp)
     ),
     _best_values as (
-      --only valid best if reindex entry exists
+      -- only valid best if reindex entry exists
       select
         distinct on (datname, schemaname, relname, indexrelname)
         _all_history_since_reindex.*,
@@ -270,30 +270,30 @@ begin
       join pg_catalog.pg_class i           on i.oid = x.indexrelid
       join pg_catalog.pg_namespace n       on n.oid = c.relnamespace
       join pg_catalog.pg_am a              on a.oid = i.relam
-      --TOAST indexes info
+      -- TOAST indexes info
       left join pg_catalog.pg_class c1     on c1.reltoastrelid = c.oid and n.nspname = 'pg_toast'
       left join pg_catalog.pg_namespace n1 on c1.relnamespace = n1.oid
 
       where
       true
-      --limit reindex for indexes on tables/mviews/TOAST
-      --and c.relkind = any (ARRAY['r'::"char", 't'::"char", 'm'::"char"])
-      --limit reindex for indexes on tables/mviews (skip TOAST until bugfix of BUG #17268)
+      -- limit reindex for indexes on tables/mviews/TOAST
+      -- and c.relkind = any (ARRAY['r'::"char", 't'::"char", 'm'::"char"])
+      -- limit reindex for indexes on tables/mviews (skip TOAST until bugfix of BUG #17268)
       and ( (c.relkind = any (ARRAY['r'::"char", 'm'::"char"])) or
             ( (c.relkind = 't'::"char") and %s )
           )
-      --ignore exclusion constraints
+      -- ignore exclusion constraints
       and not exists (select from pg_constraint where pg_constraint.conindid=i.oid and pg_constraint.contype='x')
-      --ignore indexes for system tables and index_pilot own tables
+      -- ignore indexes for system tables and index_pilot own tables
       and n.nspname not in ('pg_catalog', 'information_schema', 'index_pilot')
-      --ignore indexes on TOAST tables of system tables and index_pilot own tables
+      -- ignore indexes on TOAST tables of system tables and index_pilot own tables
       and (n1.nspname is null or n1.nspname not in ('pg_catalog', 'information_schema', 'index_pilot'))
-      --skip BRIN indexes... please see BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
+      -- skip BRIN indexes... please see BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
       and a.amname not in ('brin') and x.indislive
-      --skip indexes on temp relations
+      -- skip indexes on temp relations
       and c.relpersistence<>'t'
-      --debug only
-      --order by 1,2,3
+      -- debug only
+      -- order by 1,2,3
     $SQL$, _use_toast_tables)
     )
     as _res(schemaname name, relname name, indexrelname name, indexrelid oid)
@@ -304,7 +304,7 @@ language plpgsql;
 
 
 
---update table structure version from 3 to 4
+-- update table structure version from 3 to 4
 create or replace function index_pilot._structure_version_3_4()
 returns void as
 $BODY$
@@ -327,7 +327,7 @@ begin
      order by datname
    loop
      perform index_pilot._dblink_connect_if_not(_datname);
-     --update current state of all indexes in target database
+     -- update current state of all indexes in target database
      with _actual_indexes as (
         select schemaname, relname, indexrelname, indexrelid
         from index_pilot._remote_get_indexes_indexrelid(_datname)
@@ -351,7 +351,7 @@ $BODY$
 language plpgsql;
 
 
---update table structure version from 4 to 5
+-- update table structure version from 4 to 5
 create or replace function index_pilot._structure_version_4_5()
 returns void as
 $BODY$
@@ -382,7 +382,7 @@ $BODY$
 language plpgsql;
 
 
---update table structure version from 5 to 6
+-- update table structure version from 5 to 6
 create or replace function index_pilot._structure_version_5_6()
 returns void as
 $BODY$
@@ -397,7 +397,7 @@ language plpgsql;
 
 
 
---update table structure version from 6 to 7
+-- update table structure version from 6 to 7
 create or replace function index_pilot._structure_version_6_7()
 returns void as
 $BODY$
@@ -419,7 +419,7 @@ $BODY$
 language plpgsql;
 
 
---update table structure version from 7 to 8
+-- update table structure version from 7 to 8
 create or replace function index_pilot._structure_version_7_8()
 returns void as
 $BODY$
@@ -441,14 +441,14 @@ $BODY$
 language plpgsql;
 
 
---convert patterns from psql format to like format
+-- convert patterns from psql format to like format
 create or replace function index_pilot._pattern_convert(_var text)
 returns text as
 $BODY$
 begin
-    --replace * with .*
+    -- replace * with .*
     _var := replace(_var, '*', '.*');
-    --replace ? with .
+    -- replace ? with .
     _var := replace(_var, '?', '.');
 
     return  '^('||_var||')$';
@@ -464,9 +464,9 @@ declare
     _value text;
 begin
     perform index_pilot._check_structure_version();
-    --raise notice 'debug: |%|%|%|%|', _datname, _schemaname, _relname, _indexrelname;
+    -- raise notice 'debug: |%|%|%|%|', _datname, _schemaname, _relname, _indexrelname;
     select _t.value into _value from (
-      --per index setting
+      -- per index setting
       select 1 as priority, value from index_pilot.config where
         _key=config.key
 	and (_datname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.datname))
@@ -476,7 +476,7 @@ begin
 	and config.indexrelname is not null
 	and true
       union all
-      --per table setting
+      -- per table setting
       select 2 as priority, value from index_pilot.config where
         _key=config.key
         and (_datname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.datname))
@@ -485,7 +485,7 @@ begin
         and config.relname is not null
         and config.indexrelname is null
       union all
-      --per schema setting
+      -- per schema setting
       select 3 as priority, value from index_pilot.config where
         _key=config.key
         and (_datname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.datname))
@@ -493,14 +493,14 @@ begin
         and config.schemaname is not null
         and config.relname is null
       union all
-      --per database setting
+      -- per database setting
       select 4 as priority, value from index_pilot.config where
         _key=config.key
         and (_datname      OPERATOR(pg_catalog.~) index_pilot._pattern_convert(config.datname))
         and config.datname is not null
         and config.schemaname is null
       union all
-      --global setting
+      -- global setting
       select 5 as priority, value from index_pilot.config where
         _key=config.key
         and config.datname is null
@@ -577,38 +577,38 @@ begin
         , x.indisvalid
         , i.reltuples::bigint as indexreltuples
         , pg_catalog.pg_relation_size(i.oid)::bigint as indexsize
-        --debug only
-        --, pg_namespace.nspname
-        --, c3.relname,
-        --, am.amname
+        -- debug only
+        -- , pg_namespace.nspname
+        -- , c3.relname,
+        -- , am.amname
       from pg_index x
       join pg_catalog.pg_class c           on c.oid = x.indrelid
       join pg_catalog.pg_class i           on i.oid = x.indexrelid
       join pg_catalog.pg_namespace n       on n.oid = c.relnamespace
       join pg_catalog.pg_am a              on a.oid = i.relam
-      --TOAST indexes info
+      -- TOAST indexes info
       left join pg_catalog.pg_class c1     on c1.reltoastrelid = c.oid and n.nspname = 'pg_toast'
       left join pg_catalog.pg_namespace n1 on c1.relnamespace = n1.oid
 
       where true
-      --limit reindex for indexes on tables/mviews/TOAST
-      --and c.relkind = any (ARRAY['r'::"char", 't'::"char", 'm'::"char"])
-      --limit reindex for indexes on tables/mviews (skip TOAST until bugfix of BUG #17268)
+      -- limit reindex for indexes on tables/mviews/TOAST
+      -- and c.relkind = any (ARRAY['r'::"char", 't'::"char", 'm'::"char"])
+      -- limit reindex for indexes on tables/mviews (skip TOAST until bugfix of BUG #17268)
       and ( (c.relkind = any (ARRAY['r'::"char", 'm'::"char"])) or
             ( (c.relkind = 't'::"char") and %s )
           )
-      --ignore exclusion constraints
+      -- ignore exclusion constraints
       and not exists (select from pg_constraint where pg_constraint.conindid=i.oid and pg_constraint.contype='x')
-      --ignore indexes for system tables and index_pilot own tables
+      -- ignore indexes for system tables and index_pilot own tables
       and n.nspname not in ('pg_catalog', 'information_schema', 'index_pilot')
-      --ignore indexes on TOAST tables of system tables and index_pilot own tables
+      -- ignore indexes on TOAST tables of system tables and index_pilot own tables
       and (n1.nspname is null or n1.nspname not in ('pg_catalog', 'information_schema', 'index_pilot'))
-      --skip BRIN indexes... please see BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
+      -- skip BRIN indexes... please see BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
       and a.amname not in ('brin') and x.indislive
-      --skip indexes on temp relations
+      -- skip indexes on temp relations
       and c.relpersistence<>'t'
-      --debug only
-      --order by 1,2,3
+      -- debug only
+      -- order by 1,2,3
     $SQL$, _use_toast_tables)
     )
     as _res(indexrelid oid, schemaname name, relname name, indexrelname name, indisvalid boolean, indexreltuples bigint, indexsize bigint),
@@ -638,9 +638,9 @@ begin
   -- Establish dblink connection for managed services mode
   perform index_pilot._dblink_connect_if_not(_datname);
   
-  --merge index data fetched from the database and index_current_state
-  --now keep info about all potentially interesting indexes (even small ones)
-  --we can do it now because we keep exactly one entry in index_current_state per index (without history)
+  -- merge index data fetched from the database and index_current_state
+  -- now keep info about all potentially interesting indexes (even small ones)
+  -- we can do it now because we keep exactly one entry in index_current_state per index (without history)
   with _actual_indexes as (
      select datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples
      from index_pilot._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
@@ -658,15 +658,15 @@ begin
         and (_relname is null      or i.relname=_relname)
         and (_indexrelname is null or i.indexrelname=_indexrelname)
   )
-  --todo: do something with ugly code duplication in index_pilot._reindex_index and index_pilot._record_indexes_info
+  -- todo: do something with ugly code duplication in index_pilot._reindex_index and index_pilot._record_indexes_info
   insert into index_pilot.index_current_state as i
   (datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples, best_ratio)
   select datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples,
     case
-    --_force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
+    -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
     when (_force_populate and indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size')))
       then indexsize::real/estimated_tuples::real
-    --best_ratio estimation are null for the new index entries because we don't have any bloat information for it (default behavior)
+    -- best_ratio estimation are null for the new index entries because we don't have any bloat information for it (default behavior)
     else
       null
     end
@@ -684,14 +684,14 @@ begin
     estimated_tuples=excluded.estimated_tuples,
     best_ratio=
       case
-      --_force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
+      -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
       when (_force_populate and excluded.indexsize > pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
         then excluded.indexsize::real/excluded.estimated_tuples::real
-      --if the new index size less than minimum_reliable_index_size - we cannot use it's size and tuples as reliable gauge for the best_ratio
-      --so keep old best_ratio value instead as best guess
+      -- if the new index size less than minimum_reliable_index_size - we cannot use it's size and tuples as reliable gauge for the best_ratio
+      -- so keep old best_ratio value instead as best guess
       when (excluded.indexsize < pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
         then i.best_ratio
-      --do not overrrid null best ratio (we don't have any reliable ratio info at this stage)
+      -- do not overrrid null best ratio (we don't have any reliable ratio info at this stage)
       when (i.best_ratio is null)
         then null
       -- set best_value as least from current value and new one
@@ -699,7 +699,7 @@ begin
   least(i.best_ratio, excluded.indexsize::real/excluded.estimated_tuples::real)
       end;
 
-  --tell about not valid indexes
+  -- tell about not valid indexes
   for index_info in
     select indexrelname, relname, schemaname, datname from index_pilot.index_current_state
       where not indisvalid
@@ -708,7 +708,7 @@ begin
       and (_relname is null or relname=_relname)
       and (_indexrelname is null or indexrelname=_indexrelname)
     loop
-      raise WARNING 'Not valid index % on %.% found in %.',
+      raise warning 'Not valid index % on %.% found in %.',
       index_info.indexrelname, index_info.schemaname, index_info.relname, index_info.datname;
     end loop;
 
@@ -721,7 +721,7 @@ language plpgsql;
 create or replace function index_pilot._cleanup_old_records() returns void as
 $BODY$
 begin
-    --TODO replace with fast distinct implementation
+    -- TODO replace with fast distinct implementation
     with
         rels as materialized (select distinct datname, schemaname, relname, indexrelname from index_pilot.reindex_history),
         age_limit as materialized (select *, now()-index_pilot.get_setting(datname,schemaname,relname,indexrelname,  'reindex_history_retention_period')::interval as max_age from rels)
@@ -733,7 +733,7 @@ begin
             and reindex_history.relname=age_limit.relname
             and reindex_history.indexrelname=age_limit.indexrelname
             and reindex_history.entry_timestamp<age_limit.max_age;
-    --clean index_current_state for not existing databases
+    -- clean index_current_state for not existing databases
     delete from index_pilot.index_current_state where datid not in (
       select oid from pg_database
       where
@@ -766,8 +766,8 @@ begin
   from index_pilot.index_current_state as i
   where i.datid = _datid
   -- and indisvalid is true
-  --NULLS FIRST because indexes listed with null in estimated bloat going to be reindexed on next cron run
-  --start from maximum bloated indexes
+  -- NULLS FIRST because indexes listed with null in estimated bloat going to be reindexed on next cron run
+  -- start from maximum bloated indexes
   order by estimated_bloat DESC NULLS FIRST;
 end;
 $BODY$
@@ -799,18 +799,18 @@ begin
     raise notice 'Created dblink connection: %', _datname;
   end if;
 
-  --raise notice 'working with %.%.% %', _datname, _schemaname, _relname, _indexrelname;
+  -- raise notice 'working with %.%.% %', _datname, _schemaname, _relname, _indexrelname;
 
-  --get initial actual index size and verify that the index indeed exists in the target database
+  -- get initial actual index size and verify that the index indeed exists in the target database
   select indexsize, estimated_tuples into _indexsize_before, _estimated_tuples
   from index_pilot._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
   where indisvalid;
-  --index doesn't exist anymore
+  -- index doesn't exist anymore
   if not found then
     return;
   end if;
 
-  --perform reindex index using async dblink
+  -- perform reindex index using async dblink
   _timestamp := pg_catalog.clock_timestamp ();
   
   -- Perform REINDEX CONCURRENTLY synchronously (like the original pg_index_watch)
@@ -888,9 +888,9 @@ begin
       and
       (_force or
           (
-            --skip too small indexes to have any interest
+            -- skip too small indexes to have any interest
             indexsize >= pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'index_size_threshold'))
-            --skip indexes set to skip
+            -- skip indexes set to skip
             and index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'skip')::boolean is distinct from true
             -- and index_pilot.get_setting (for future configurability)
             and (
@@ -978,8 +978,8 @@ $BODY$
 language plpgsql;
 
 
---user callable shell over index_pilot._record_indexes_info(... _force_populate=>true)
---use to populate index bloat info from current state without reindexing
+-- user callable shell over index_pilot._record_indexes_info(... _force_populate=>true)
+-- use to populate index bloat info from current state without reindexing
 create or replace function index_pilot.do_force_populate_index_stats(_datname name, _schemaname name, _relname name, _indexrelname name)
 returns void
 as
@@ -1055,10 +1055,10 @@ begin
         $SQL$
     , _index.schemaname, _index.relname, _index.indexrelname)) as _res(indexrelid oid) )
       then
-        raise WARNING 'The invalid index %.%_ccnew exists, but no original index %.% was found in database %', _index.schemaname, _index.indexrelname, _index.schemaname, _index.indexrelname, _index.datname;
+        raise warning 'The invalid index %.%_ccnew exists, but no original index %.% was found in database %', _index.schemaname, _index.indexrelname, _index.schemaname, _index.indexrelname, _index.datname;
       end if;
       perform dblink(_index.datname, format('drop index concurrently %I.%I_ccnew', _index.schemaname, _index.indexrelname));
-      raise WARNING 'The invalid index %.%_ccnew was dropped in database %', _index.schemaname, _index.indexrelname, _index.datname;
+      raise warning 'The invalid index %.%_ccnew was dropped in database %', _index.schemaname, _index.indexrelname, _index.datname;
     end if;
     delete from index_pilot.current_processed_index
        where
@@ -1091,7 +1091,7 @@ begin
     end if;
     if not index_pilot._check_pg_version_bugfixed()
     then
-        raise WARNING 'The database version % is affected by PostgreSQL bugs which make using pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
+        raise warning 'The database version % is affected by PostgreSQL bugs which make using pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
    https://www.postgresql.org/message-id/E1mumI4-0001Zp-PB@gemulon.postgresql.org
    and
    https://www.postgresql.org/message-id/E1n8C7O-00066j-Q5@gemulon.postgresql.org',
