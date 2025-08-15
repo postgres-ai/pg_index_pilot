@@ -820,45 +820,47 @@ begin
   --perform reindex index using async dblink
   _timestamp := pg_catalog.clock_timestamp ();
   
-  -- Simple async reindex concurrently (fire-and-forget)
-  if dblink_send_query(_conn_name, 'reindex index concurrently '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_indexrelname)) = 1 then
-    raise notice 'reindex concurrently %.% started successfully (async)', _schemaname, _indexrelname;
-    
-    -- Simple check - is it still busy immediately?
-    if dblink_is_busy(_conn_name) = 1 then
-      raise notice 'reindex %.% is running in background', _schemaname, _indexrelname;
-      -- Leave connection open for async operation to continue
-    else
-      -- Quick completion, get result
-      perform dblink_get_result(_conn_name);
-      raise notice 'reindex concurrently %.% completed quickly', _schemaname, _indexrelname;
-      -- Can disconnect since it's done
-      perform dblink_disconnect(_conn_name);
-    end if;
-  else
-    raise notice 'Failed to send async reindex for %.% - please execute manually: reindex index concurrently %.%;', _schemaname, _indexrelname, _schemaname, _indexrelname;
-    perform dblink_disconnect(_conn_name);
-  end if;
+  -- Perform REINDEX CONCURRENTLY synchronously (like the original pg_index_watch)
+  -- This will wait for completion before returning
+  begin
+    perform dblink(_conn_name, 'reindex index concurrently '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_indexrelname));
+    raise notice 'reindex concurrently %.% completed successfully', _schemaname, _indexrelname;
+  exception when others then
+    raise notice 'reindex failed for %.%: %', _schemaname, _indexrelname, SQLERRM;
+    -- Continue anyway, the index might have issues
+  end;
+  
+  -- Always disconnect after completion
+  perform dblink_disconnect(_conn_name);
 
   _reindex_duration := pg_catalog.clock_timestamp ()-_timestamp;
 
-  -- Fire-and-forget mode: reindex is running asynchronously
-  -- Log the start of reindex operation immediately
+  -- Get the new index size after reindex
+  select indexsize into _indexsize_after
+  from index_pilot._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
+  where indisvalid is true;
+  
+  -- If index doesn't exist anymore or is invalid, use the original size
+  if _indexsize_after is null then
+    _indexsize_after := _indexsize_before;
+  end if;
+
+  -- Log the completed reindex operation
   insert into index_pilot.reindex_history (
     datname, schemaname, relname, indexrelname,
     indexsize_before, indexsize_after, estimated_tuples, reindex_duration, analyze_duration,
     entry_timestamp
   ) values (
     _datname, _schemaname, _relname, _indexrelname,
-    _indexsize_before, NULL, _estimated_tuples, NULL, NULL,  -- NULL for unknown values
+    _indexsize_before, _indexsize_after, _estimated_tuples, _reindex_duration, '0'::interval,
     now()
   );
   
-  raise notice 'reindex STARTED: %.% (fire-and-forget mode) - size before: %', 
-    _schemaname, _indexrelname, pg_size_pretty(_indexsize_before);
-  
-  -- The actual reindex completion and final size will be detected by periodic monitoring
-  -- when it runs next time and compares current vs recorded sizes
+  raise notice 'reindex COMPLETED: %.% - size before: %, size after: %, duration: %', 
+    _schemaname, _indexrelname, 
+    pg_size_pretty(_indexsize_before), 
+    pg_size_pretty(_indexsize_after),
+    _reindex_duration;
 end;
 $BODY$
 language plpgsql strict;
@@ -917,7 +919,13 @@ begin
           _index.indexrelname
        );
        
+       -- COMMIT before reindex to release locks (prevents deadlock with REINDEX CONCURRENTLY)
+       COMMIT;
+       
        perform index_pilot._reindex_index(_index.datname, _index.schemaname, _index.relname, _index.indexrelname);
+       
+       -- COMMIT after reindex to save the work
+       COMMIT;
        
        delete from index_pilot.current_processed_index
        where
@@ -925,6 +933,9 @@ begin
           schemaname=_index.schemaname and
           relname=_index.relname and
           indexrelname=_index.indexrelname;
+          
+       -- COMMIT after cleanup
+       COMMIT;
     end loop;
   return;
 end;
@@ -1070,47 +1081,22 @@ begin
         call index_pilot.do_reindex(current_database(), null, null, null, force);
     end if;
 
-    -- Complete reindex history records for fire-and-forget operations
-    -- Update size_after and reindex_duration for records that have placeholder values
-    with completed_reindexes as (
-        update index_pilot.reindex_history 
-        set 
-            indexsize_after = (
-                select indexsize 
-                from index_pilot._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
-                where indisvalid is true
-            ),
-            reindex_duration = now() - entry_timestamp
-        where 
-            datname = current_database()
-            and indexsize_after is null  -- NULL indicates not yet completed
-            and entry_timestamp > now() - interval '24 hours'  -- Look at last 24 hours
-            and exists (
-                select 1 
-                from index_pilot._remote_get_indexes_info(datname, schemaname, relname, indexrelname)
-                where indisvalid is true
-            )
-            -- Don't update if a _ccnew index exists (REINDEX CONCURRENTLY still in progress)
-            and not exists (
-                select 1 
-                from pg_class c
-                join pg_namespace n on c.relnamespace = n.oid
-                where n.nspname = schemaname
-                and c.relname ~ ('^' || indexrelname || '_ccnew[0-9]*$')
-            )
-        RETURNING datname, schemaname, relname, indexrelname, indexsize_after, estimated_tuples
-    )
-    -- Update best_ratio for successfully reindexed indexes
+    -- Update best_ratio for successfully completed reindexes
+    -- Since reindexes are now synchronous, we just need to update best_ratio
+    -- for recent reindex history entries
     update index_pilot.index_current_state as ics
-    set best_ratio = cr.indexsize_after::real / greatest(1, cr.estimated_tuples)::real
-    from completed_reindexes cr
-    where ics.datname = cr.datname
-      and ics.schemaname = cr.schemaname
-      and ics.relname = cr.relname
-      and ics.indexrelname = cr.indexrelname
-      and cr.indexsize_after > pg_size_bytes(
-          index_pilot.get_setting(cr.datname, cr.schemaname, cr.relname, cr.indexrelname, 'minimum_reliable_index_size')
-      );
+    set best_ratio = rh.indexsize_after::real / greatest(1, rh.estimated_tuples)::real
+    from index_pilot.reindex_history rh
+    where ics.datname = rh.datname
+      and ics.schemaname = rh.schemaname
+      and ics.relname = rh.relname
+      and ics.indexrelname = rh.indexrelname
+      and rh.entry_timestamp > now() - interval '1 hour'
+      and rh.indexsize_after > pg_size_bytes(
+          index_pilot.get_setting(rh.datname, rh.schemaname, rh.relname, rh.indexrelname, 'minimum_reliable_index_size')
+      )
+      and (ics.best_ratio is null or 
+           rh.indexsize_after::real / greatest(1, rh.estimated_tuples)::real < ics.best_ratio);
 
     perform pg_advisory_unlock(_id);
 end;
