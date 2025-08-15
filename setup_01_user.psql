@@ -5,9 +5,9 @@
 -- Check PostgreSQL version
 do $$
 begin
-  if (select setting from pg_settings where name='server_version_num') < '12'
+  if (select setting::int from pg_settings where name='server_version_num') < 130000
   then
-    raise 'This library works only for PostgreSQL 12 or higher!';
+    raise 'This library works only for PostgreSQL 13 or higher!';
   end if;
 end; $$;
 
@@ -128,17 +128,17 @@ begin
   raise notice '   ALTER ROLE index_pilot PASSWORD ''your_secure_password'';';
   raise notice '';
   raise notice '2. Connect as index_pilot user and install pg_index_pilot:';
-  raise notice '   psql -U index_pilot -d % -f install_as_index_pilot.psql', current_database();
+  raise notice '   psql -U index_pilot -d % -f setup_02_tooling.psql', current_database();
   raise notice '';
   raise notice '3. Setup secure FDW connection:';
-  raise notice '   psql -U index_pilot -d % -c "SELECT index_watch.setup_fdw_self_connection(''hostname'', 5432, ''%'');"', current_database(), current_database();
-  raise notice '   psql -U index_pilot -d % -c "SELECT index_watch.setup_user_mapping(''index_pilot'', ''your_secure_password'');"', current_database();
+  raise notice '   psql -U index_pilot -d % -c "SELECT index_pilot.setup_fdw_self_connection(''hostname'', 5432, ''%'');"', current_database(), current_database();
+  raise notice '   psql -U index_pilot -d % -c "SELECT index_pilot.setup_user_mapping(''index_pilot'', ''your_secure_password'');"', current_database();
   raise notice '';
   raise notice '4. Create USER MAPPING for admin (managed services only):';
   raise notice '   psql -U postgres -d % -c "CREATE USER MAPPING FOR postgres SERVER index_pilot_self OPTIONS (user ''index_pilot'', password ''your_secure_password'');"', current_database();
   raise notice '   psql -U postgres -d % -c "CREATE USER MAPPING FOR rds_superuser SERVER index_pilot_self OPTIONS (user ''index_pilot'', password ''your_secure_password'');"', current_database();
   raise notice '';
   raise notice '5. Test the installation:';
-  raise notice '   psql -U index_pilot -d % -c "SELECT * FROM index_watch.check_permissions();"', current_database();
+  raise notice '   psql -U index_pilot -d % -c "SELECT * FROM index_pilot.check_permissions();"', current_database();
   raise notice '';
 end $$;
