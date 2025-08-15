@@ -52,7 +52,7 @@ begin
     end if;
     if not index_pilot._check_pg14_version_bugfixed()
       then
-         raise WARNING 'The database version % is affected by PostgreSQL bug BUG #17485 which makes using pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
+         raise WARNING 'The database version % is affected by PostgreSQL BUG #17485 which makes using pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
        https://www.postgresql.org/message-id/202205251144.6t4urostzc3s@alvherre.pgsql',
         current_setting('server_version');
     end if;
@@ -270,15 +270,15 @@ begin
       join pg_catalog.pg_class i           on i.oid = x.indexrelid
       join pg_catalog.pg_namespace n       on n.oid = c.relnamespace
       join pg_catalog.pg_am a              on a.oid = i.relam
-      --toast indexes info
+      --TOAST indexes info
       left join pg_catalog.pg_class c1     on c1.reltoastrelid = c.oid and n.nspname = 'pg_toast'
       left join pg_catalog.pg_namespace n1 on c1.relnamespace = n1.oid
 
       where
       true
-      --limit reindex for indexes on tables/mviews/toast
+      --limit reindex for indexes on tables/mviews/TOAST
       --and c.relkind = any (ARRAY['r'::"char", 't'::"char", 'm'::"char"])
-      --limit reindex for indexes on tables/mviews (skip toast until bugfix of BUG #17268)
+      --limit reindex for indexes on tables/mviews (skip TOAST until bugfix of BUG #17268)
       and ( (c.relkind = any (ARRAY['r'::"char", 'm'::"char"])) or
             ( (c.relkind = 't'::"char") and %s )
           )
@@ -286,9 +286,9 @@ begin
       and not exists (select from pg_constraint where pg_constraint.conindid=i.oid and pg_constraint.contype='x')
       --ignore indexes for system tables and index_pilot own tables
       and n.nspname not in ('pg_catalog', 'information_schema', 'index_pilot')
-      --ignore indexes on toast tables of system tables and index_pilot own tables
+      --ignore indexes on TOAST tables of system tables and index_pilot own tables
       and (n1.nspname is null or n1.nspname not in ('pg_catalog', 'information_schema', 'index_pilot'))
-      --skip BRIN indexes... please see bug BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
+      --skip BRIN indexes... please see BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
       and a.amname not in ('brin') and x.indislive
       --skip indexes on temp relations
       and c.relpersistence<>'t'
@@ -586,14 +586,14 @@ begin
       join pg_catalog.pg_class i           on i.oid = x.indexrelid
       join pg_catalog.pg_namespace n       on n.oid = c.relnamespace
       join pg_catalog.pg_am a              on a.oid = i.relam
-      --toast indexes info
+      --TOAST indexes info
       left join pg_catalog.pg_class c1     on c1.reltoastrelid = c.oid and n.nspname = 'pg_toast'
       left join pg_catalog.pg_namespace n1 on c1.relnamespace = n1.oid
 
       where true
-      --limit reindex for indexes on tables/mviews/toast
+      --limit reindex for indexes on tables/mviews/TOAST
       --and c.relkind = any (ARRAY['r'::"char", 't'::"char", 'm'::"char"])
-      --limit reindex for indexes on tables/mviews (skip toast until bugfix of BUG #17268)
+      --limit reindex for indexes on tables/mviews (skip TOAST until bugfix of BUG #17268)
       and ( (c.relkind = any (ARRAY['r'::"char", 'm'::"char"])) or
             ( (c.relkind = 't'::"char") and %s )
           )
@@ -601,9 +601,9 @@ begin
       and not exists (select from pg_constraint where pg_constraint.conindid=i.oid and pg_constraint.contype='x')
       --ignore indexes for system tables and index_pilot own tables
       and n.nspname not in ('pg_catalog', 'information_schema', 'index_pilot')
-      --ignore indexes on toast tables of system tables and index_pilot own tables
+      --ignore indexes on TOAST tables of system tables and index_pilot own tables
       and (n1.nspname is null or n1.nspname not in ('pg_catalog', 'information_schema', 'index_pilot'))
-      --skip BRIN indexes... please see bug BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
+      --skip BRIN indexes... please see BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
       and a.amname not in ('brin') and x.indislive
       --skip indexes on temp relations
       and c.relpersistence<>'t'
@@ -1085,7 +1085,7 @@ declare
 begin
     if not index_pilot._check_pg14_version_bugfixed()
       then
-         raise 'The database version % is affected by PostgreSQL bug BUG #17485 which makes using pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
+         raise 'The database version % is affected by PostgreSQL BUG #17485 which makes using pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
        https://www.postgresql.org/message-id/202205251144.6t4urostzc3s@alvherre.pgsql',
         current_setting('server_version');
     end if;
