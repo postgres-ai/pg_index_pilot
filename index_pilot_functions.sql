@@ -44,7 +44,7 @@ begin
   else
     if not index_pilot._check_pg_version_bugfixed()
     then
-       raise WARNING 'The database version % affected by PostgreSQL bugs which make use pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
+       raise WARNING 'The database version % is affected by PostgreSQL bugs which make using pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
    https://www.postgresql.org/message-id/E1mumI4-0001Zp-PB@gemulon.postgresql.org
    and
    https://www.postgresql.org/message-id/E1n8C7O-00066j-Q5@gemulon.postgresql.org',
@@ -52,7 +52,7 @@ begin
     end if;
     if not index_pilot._check_pg14_version_bugfixed()
       then
-         raise WARNING 'The database version % affected by PostgreSQL bug BUG #17485 which make use pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
+         raise WARNING 'The database version % is affected by PostgreSQL bug BUG #17485 which makes using pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
        https://www.postgresql.org/message-id/202205251144.6t4urostzc3s@alvherre.pgsql',
         current_setting('server_version');
     end if;
@@ -231,7 +231,7 @@ create or replace function index_pilot._dblink_connect_if_not(_datname name) ret
 $BODY$
 begin
     -- Use secure FDW connection if not already connected
-    if _datname = any(dblink_get_connections()) is not true then
+    if not (_datname = any(dblink_get_connections())) then
         perform index_pilot._connect_securely(_datname);
     end if;
     return;
@@ -278,7 +278,7 @@ begin
       true
       --limit reindex for indexes on tables/mviews/toast
       --and c.relkind = any (ARRAY['r'::"char", 't'::"char", 'm'::"char"])
-      --limit reindex for indexes on tables/mviews (skip topast until bugfix of BUG #17268)
+      --limit reindex for indexes on tables/mviews (skip toast until bugfix of BUG #17268)
       and ( (c.relkind = any (ARRAY['r'::"char", 'm'::"char"])) or
             ( (c.relkind = 't'::"char") and %s )
           )
@@ -289,7 +289,7 @@ begin
       --ignore indexes on toast tables of system tables and index_pilot own tables
       and (n1.nspname is null or n1.nspname not in ('pg_catalog', 'information_schema', 'index_pilot'))
       --skip BRIN indexes... please see bug BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
-      and a.amname not in ('brin') and x.indislive is true
+      and a.amname not in ('brin') and x.indislive
       --skip indexes on temp relations
       and c.relpersistence<>'t'
       --debug only
@@ -593,7 +593,7 @@ begin
       where true
       --limit reindex for indexes on tables/mviews/toast
       --and c.relkind = any (ARRAY['r'::"char", 't'::"char", 'm'::"char"])
-      --limit reindex for indexes on tables/mviews (skip topast until bugfix of BUG #17268)
+      --limit reindex for indexes on tables/mviews (skip toast until bugfix of BUG #17268)
       and ( (c.relkind = any (ARRAY['r'::"char", 'm'::"char"])) or
             ( (c.relkind = 't'::"char") and %s )
           )
@@ -604,7 +604,7 @@ begin
       --ignore indexes on toast tables of system tables and index_pilot own tables
       and (n1.nspname is null or n1.nspname not in ('pg_catalog', 'information_schema', 'index_pilot'))
       --skip BRIN indexes... please see bug BUG #17205 https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%%40postgresql.org
-      and a.amname not in ('brin') and x.indislive is true
+      and a.amname not in ('brin') and x.indislive
       --skip indexes on temp relations
       and c.relpersistence<>'t'
       --debug only
@@ -663,7 +663,7 @@ begin
   (datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples, best_ratio)
   select datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples,
     case
-    --_force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be realiable estimated)
+    --_force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
     when (_force_populate and indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size')))
       then indexsize::real/estimated_tuples::real
     --best_ratio estimation are null for the new index entries because we don't have any bloat information for it (default behavior)
@@ -684,7 +684,7 @@ begin
     estimated_tuples=excluded.estimated_tuples,
     best_ratio=
       case
-      --_force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be realiable estimated)
+      --_force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
       when (_force_populate and excluded.indexsize > pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
         then excluded.indexsize::real/excluded.estimated_tuples::real
       --if the new index size less than minimum_reliable_index_size - we cannot use it's size and tuples as reliable gauge for the best_ratio
@@ -702,7 +702,7 @@ begin
   --tell about not valid indexes
   for index_info in
     select indexrelname, relname, schemaname, datname from index_pilot.index_current_state
-      where indisvalid is false
+      where not indisvalid
       and datname=_datname
       and (_schemaname is null or schemaname=_schemaname)
       and (_relname is null or relname=_relname)
@@ -804,7 +804,7 @@ begin
   --get initial actual index size and verify that the index indeed exists in the target database
   select indexsize, estimated_tuples into _indexsize_before, _estimated_tuples
   from index_pilot._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
-  where indisvalid is true;
+  where indisvalid;
   --index doesn't exist anymore
   if not found then
     return;
@@ -830,7 +830,7 @@ begin
   -- Get the new index size after reindex
   select indexsize into _indexsize_after
   from index_pilot._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
-  where indisvalid is true;
+  where indisvalid;
   
   -- If index doesn't exist anymore or is invalid, use the original size
   if _indexsize_after is null then
@@ -925,7 +925,7 @@ begin
          indexsize, NULL, estimated_tuples,  -- NULL for in-progress
          NULL, NULL, now()
        from index_pilot._remote_get_indexes_info(_index.datname, _index.schemaname, _index.relname, _index.indexrelname)
-       where indisvalid is true;
+       where indisvalid;
        
        -- COMMIT to release all locks before starting async REINDEX
        COMMIT;
@@ -979,7 +979,7 @@ language plpgsql;
 
 
 --user callable shell over index_pilot._record_indexes_info(... _force_populate=>true)
---use to populate index bloa info from current state without reindexing
+--use to populate index bloat info from current state without reindexing
 create or replace function index_pilot.do_force_populate_index_stats(_datname name, _schemaname name, _relname name, _indexrelname name)
 returns void
 as
@@ -1035,7 +1035,7 @@ begin
         n.nspname = '%1$s'
         and c.relname = '%2$s'
         and i.relname = '%3$s_ccnew'
-        and x.indisvalid is false
+        and not x.indisvalid
         $SQL$
     , _index.schemaname, _index.relname, _index.indexrelname)) as _res(indexrelid oid) )
     then
@@ -1085,13 +1085,13 @@ declare
 begin
     if not index_pilot._check_pg14_version_bugfixed()
       then
-         raise 'The database version % affected by PostgreSQL bug BUG #17485 which make use pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
+         raise 'The database version % is affected by PostgreSQL bug BUG #17485 which makes using pg_index_pilot unsafe, please update to latest minor release. For additional info please see:
        https://www.postgresql.org/message-id/202205251144.6t4urostzc3s@alvherre.pgsql',
         current_setting('server_version');
     end if;
     if not index_pilot._check_pg_version_bugfixed()
     then
-        raise WARNING 'The database version % affected by PostgreSQL bugs which make use pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
+        raise WARNING 'The database version % is affected by PostgreSQL bugs which make using pg_index_pilot potentially unsafe, please update to latest minor release. For additional info please see:
    https://www.postgresql.org/message-id/E1mumI4-0001Zp-PB@gemulon.postgresql.org
    and
    https://www.postgresql.org/message-id/E1n8C7O-00066j-Q5@gemulon.postgresql.org',
