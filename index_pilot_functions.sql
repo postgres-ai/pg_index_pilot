@@ -207,7 +207,7 @@ create or replace function index_pilot._connect_securely(_datname name) returns 
 $BODY$
 begin
     -- Only allow connection to current database (managed services compatible mode)
-    if _datname != current_database() then
+    if _datname <> current_database() then
         raise exception 'Only current database % is supported. Cannot access database %', current_database(), _datname;
     end if;
     
@@ -949,7 +949,7 @@ begin
            -- We could check pg_stat_activity here to confirm it's running
            perform 1 from pg_stat_activity 
            where query ilike '%reindex%concurrently%' || _index.indexrelname || '%'
-           and pid != pg_backend_pid();
+           and pid <> pg_backend_pid();
            
            if found then
                raise notice 'Confirmed: REINDEX is running for %.%', _index.schemaname, _index.indexrelname;
