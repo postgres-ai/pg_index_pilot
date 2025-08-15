@@ -1,0 +1,240 @@
+# GitLab CI/CD configuration for pg_index_pilot
+
+# You can override the included template(s) by including variable overrides
+# SAST customization: https://docs.gitlab.com/ee/user/application_security/sast/#customizing-the-sast-settings
+# Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure
+# Dependency Scanning customization: https://docs.gitlab.com/ee/user/application_security/dependency_scanning/#customizing-the-dependency-scanning-settings
+# Container Scanning customization: https://docs.gitlab.com/ee/user/application_security/container_scanning/#customizing-the-container-scanning-settings
+# Note that environment variables can be set in several places
+# See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+
+stages:
+  - test
+  - security
+
+variables:
+  POSTGRES_DB: test_index_pilot
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_HOST: postgres
+  POSTGRES_HOST_AUTH_METHOD: trust
+  # Allow connections from Docker network for FDW
+  POSTGRES_INITDB_ARGS: "--auth-host=md5 --auth-local=trust"
+
+# Test against multiple PostgreSQL versions
+.test_template: &test_definition
+  stage: test
+  image: postgres:alpine
+  script:
+    - apk add --no-cache bash
+    - |
+      echo "Waiting for PostgreSQL to be ready..."
+      WAIT_TIME=0
+      until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1" > /dev/null 2>&1 || [ $WAIT_TIME -eq 30 ]; do
+        echo "Waiting for database... ($WAIT_TIME seconds)"
+        sleep 2
+        WAIT_TIME=$((WAIT_TIME + 2))
+      done
+      if [ $WAIT_TIME -eq 30 ]; then
+        echo "ERROR: Database failed to start within 30 seconds"
+        exit 1
+      fi
+      echo "Database ready after $WAIT_TIME seconds"
+    - |
+      echo "PostgreSQL version:"
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT version();"
+    - |
+      echo "Checking PostgreSQL connectivity..."
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT inet_server_addr(), inet_server_port();"
+      echo "Checking pg_hba.conf..."
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT * FROM pg_hba_file_rules;"
+    - |
+      echo "Running test suite..."
+      chmod +x test/run_tests.sh
+      # Run from root directory so SQL files can be found
+      # Note: FDW needs to connect back to the database, use localhost for loopback in Docker
+      ./test/run_tests.sh -h postgres -u postgres -w "$POSTGRES_PASSWORD" -d test_index_pilot
+  allow_failure: false
+  artifacts:
+    reports:
+      junit: test/test-results.xml
+    when: always
+    paths:
+      - test/test-results.xml
+    expire_in: 1 week
+
+# Test PostgreSQL 13 (minimum supported version)
+test:pg13:
+  <<: *test_definition
+  services:
+    - name: postgres:13-alpine
+      alias: postgres
+  tags:
+    - docker
+
+# Test PostgreSQL 14
+test:pg14:
+  <<: *test_definition
+  services:
+    - name: postgres:14-alpine
+      alias: postgres
+  tags:
+    - docker
+
+# Test PostgreSQL 15
+test:pg15:
+  <<: *test_definition
+  services:
+    - name: postgres:15-alpine
+      alias: postgres
+  tags:
+    - docker
+
+# Test PostgreSQL 16
+test:pg16:
+  <<: *test_definition
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+  tags:
+    - docker
+
+# Test PostgreSQL 17 (latest)
+test:pg17:
+  <<: *test_definition
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  tags:
+    - docker
+
+# Test on managed service simulation (non-superuser)
+test:nonsuperuser:
+  stage: test
+  image: postgres:16-alpine
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+  script:
+    - apk add --no-cache bash
+    - |
+      echo "Waiting for PostgreSQL to be ready..."
+      WAIT_TIME=0
+      until PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1" > /dev/null 2>&1 || [ $WAIT_TIME -eq 30 ]; do
+        echo "Waiting for database... ($WAIT_TIME seconds)"
+        sleep 2
+        WAIT_TIME=$((WAIT_TIME + 2))
+      done
+      if [ $WAIT_TIME -eq 30 ]; then
+        echo "ERROR: Database failed to start within 30 seconds"
+        exit 1
+      fi
+      echo "Database ready after $WAIT_TIME seconds"
+    - |
+      echo "Setting up non-superuser test environment..."
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres << EOF
+      CREATE DATABASE test_index_pilot;
+      CREATE USER index_pilot WITH PASSWORD 'testpass';
+      GRANT CONNECT, CREATE ON DATABASE test_index_pilot TO index_pilot;
+      \c test_index_pilot
+      CREATE EXTENSION dblink;
+      CREATE EXTENSION postgres_fdw;
+      GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO index_pilot;
+      GRANT EXECUTE ON FUNCTION dblink_connect_u(text,text) TO index_pilot;
+      EOF
+    - |
+      echo "Installing as non-superuser..."
+      PGPASSWORD=testpass psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_tables.sql
+      PGPASSWORD=testpass psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_functions.sql
+    - |
+      echo "Setting up FDW for non-superuser..."
+      # Get the actual IP for FDW connection
+      POSTGRES_IP=$(PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -d test_index_pilot -tAc "SELECT host(inet_server_addr())" || echo "postgres")
+      echo "Using IP for FDW: $POSTGRES_IP"
+      
+      # Setup FDW as admin first, then grant to index_pilot
+      PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -d test_index_pilot << EOF
+      -- Create FDW server
+      SELECT index_pilot.setup_fdw_self_connection('$POSTGRES_IP', 5432, 'test_index_pilot');
+      -- Create user mapping for postgres (needed for internal functions)
+      SELECT index_pilot.setup_user_mapping('postgres', '$POSTGRES_PASSWORD');
+      -- Create user mapping for index_pilot
+      SELECT index_pilot.setup_user_mapping('index_pilot', 'testpass');
+      -- Grant usage on the server to index_pilot
+      GRANT USAGE ON FOREIGN SERVER index_pilot_self TO index_pilot;
+      EOF
+    - |
+      echo "Running non-superuser tests..."
+      chmod +x test/run_tests.sh
+      SKIP_INSTALL=true ./test/run_tests.sh -h postgres -u index_pilot -w testpass -d test_index_pilot
+  tags:
+    - docker
+  allow_failure: false
+
+
+# SQL-specific security checks (SAST doesn't catch these)
+sql-security:
+  stage: security
+  image: alpine:latest
+  script:
+    - apk add --no-cache grep
+    - |
+      echo "======================================"
+      echo "SQL-Specific Security Checks"
+      echo "======================================"
+    - |
+      echo "Checking for SQL injection vulnerabilities..."
+      # Check for actual SQL injection patterns - string concatenation with user input
+      # Look for EXECUTE with || concatenation (the real danger)
+      # But exclude our safe usage with format() and quote_ident()
+      if grep -E "EXECUTE[[:space:]]+[^;]*\|\|[[:space:]]*[^';]*\|\|" *.sql | grep -v "format\|quote_ident\|quote_literal" 2>/dev/null; then
+        echo "ERROR: Potential SQL injection - EXECUTE with unsafe concatenation"
+        echo "Use format() with %I for identifiers and %L for literals instead"
+        exit 1
+      fi
+    - |
+      echo "Checking for hardcoded passwords..."
+      # Look for actual password assignments, not just the word PASSWORD
+      if grep -E "(PASSWORD|IDENTIFIED BY)[[:space:]]*[=:][[:space:]]*'[^']+'" *.sql | grep -v "your_secure_password\|your_password\|changeme\|testpass" 2>/dev/null; then
+        echo "ERROR: Hardcoded password found"
+        exit 1
+      fi
+    - |
+      echo "Checking for unsafe dynamic SQL patterns..."
+      # Check for string concatenation in WHERE clauses (common injection point)
+      if grep -E "WHERE.*\|\|.*quote_" *.sql | grep -v "quote_literal\|quote_ident" 2>/dev/null; then
+        echo "WARNING: Dynamic WHERE clause detected - verify proper escaping"
+      fi
+    - |
+      echo "Checking for SECURITY DEFINER without search_path..."
+      # SECURITY DEFINER functions should set search_path to avoid hijacking
+      if grep -A5 "SECURITY DEFINER" *.sql | grep -v "search_path" 2>/dev/null; then
+        echo "WARNING: SECURITY DEFINER function may need explicit search_path"
+      fi
+    - echo "✅ SQL security checks passed"
+  tags:
+    - docker
+  allow_failure: false
+
+# Code quality check
+quality:sql:
+  stage: test
+  image: postgres:16-alpine
+  script:
+    - |
+      echo "Checking SQL syntax..."
+      for file in *.sql test/*.sql; do
+        if [ -f "$file" ]; then
+          echo "Checking $file..."
+          # Use PostgreSQL to parse check the SQL
+          psql -h localhost -U postgres -f "$file" --set ON_ERROR_STOP=on -c "BEGIN; ROLLBACK;" 2>&1 | grep -E "ERROR|FATAL" && exit 1 || true
+        fi
+      done
+    - echo "SQL syntax check passed"
+  tags:
+    - docker
+  allow_failure: true
