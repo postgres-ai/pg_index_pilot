@@ -6,7 +6,7 @@
 -- Verify we're running as index_pilot user
 do $$
 begin
-    if current_user != 'index_pilot' then
+    if current_user <> 'index_pilot' then
         raise exception 'This script must be run as the index_pilot user. Current user: %', current_user;
     end if;
 end $$;
