@@ -110,7 +110,7 @@ create unique index tables_version_single_row on  index_pilot.tables_version((ve
 insert into index_pilot.tables_version values(8);
 
 
--- current proccessed index can be invalid
+-- current processed index can be invalid
 create table index_pilot.current_processed_index
 (
   id bigserial primary key,
