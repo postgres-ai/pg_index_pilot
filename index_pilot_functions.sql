@@ -939,8 +939,8 @@ begin
        ) = 1 then
            raise notice 'Started async REINDEX CONCURRENTLY for %.%', _index.schemaname, _index.indexrelname;
            
-           -- IMMEDIATELY COMMIT to ensure connection stays alive
-           -- This is crucial - without this, the connection might close
+           -- COMMIT to release any locks this transaction might hold
+           -- This prevents deadlocks between our transaction and REINDEX CONCURRENTLY
            COMMIT;
            
            -- Optional: Check if reindex is actually running
