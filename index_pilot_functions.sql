@@ -790,20 +790,14 @@ declare
   _indexrelid oid;
   _datid oid;
   _indisvalid boolean;
-  _conn_name text := 'reindex_' || md5(_schemaname || '.' || _indexrelname || now()::text);
 begin
-  -- Establish secure dblink connection via FDW
-  -- Use unique connection name to avoid disconnecting other async operations
-  begin
-    -- Connect using unique name for this specific reindex
-    if _conn_name = any(dblink_get_connections()) then
-      perform dblink_disconnect(_conn_name);
-    end if;
-    perform dblink_connect_u(_conn_name, 'index_pilot_self');
-    raise notice 'Created secure FDW connection: % for %.%', _conn_name, _schemaname, _indexrelname;
-  exception when others then
-    raise exception 'Failed to create secure FDW connection: %', SQLERRM;
-  end;
+  -- Establish dblink connection using FDW for secure password management
+  -- Use the database name as connection name (not unique per index)
+  if _datname = any(dblink_get_connections()) is not true then
+    -- Connect using postgres_fdw to avoid plain-text passwords
+    perform dblink_connect_u(_datname, 'index_pilot_self');
+    raise notice 'Created dblink connection: %', _datname;
+  end if;
 
   --raise notice 'working with %.%.% %', _datname, _schemaname, _relname, _indexrelname;
 
@@ -823,15 +817,14 @@ begin
   -- Perform REINDEX CONCURRENTLY synchronously (like the original pg_index_watch)
   -- This will wait for completion before returning
   begin
-    perform dblink(_conn_name, 'reindex index concurrently '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_indexrelname));
+    perform dblink(_datname, 'reindex index concurrently '||pg_catalog.quote_ident(_schemaname)||'.'||pg_catalog.quote_ident(_indexrelname));
     raise notice 'reindex concurrently %.% completed successfully', _schemaname, _indexrelname;
   exception when others then
     raise notice 'reindex failed for %.%: %', _schemaname, _indexrelname, SQLERRM;
     -- Continue anyway, the index might have issues
   end;
   
-  -- Always disconnect after completion
-  perform dblink_disconnect(_conn_name);
+  -- Don't disconnect - keep connection for reuse (like original)
 
   _reindex_duration := pg_catalog.clock_timestamp ()-_timestamp;
 
@@ -875,8 +868,10 @@ declare
 begin
   perform index_pilot._check_structure_version();
 
+  -- Establish dblink connection before any transaction
   if _datname = any(dblink_get_connections()) is not true then
     perform index_pilot._dblink_connect_if_not(_datname);
+    COMMIT; -- Commit after establishing connection to avoid lock issues
   end if;
   for _index in
     select datname, schemaname, relname, indexrelname, indexsize, estimated_bloat
@@ -906,6 +901,7 @@ begin
           )
       )
     loop
+       -- Record what we're working on
        insert into index_pilot.current_processed_index(
           datname,
           schemaname,
@@ -919,23 +915,63 @@ begin
           _index.indexrelname
        );
        
-       -- COMMIT before reindex to release locks (prevents deadlock with REINDEX CONCURRENTLY)
+       -- Log the reindex start with NULL values for in-progress tracking
+       insert into index_pilot.reindex_history (
+         datname, schemaname, relname, indexrelname,
+         indexsize_before, indexsize_after, estimated_tuples, 
+         reindex_duration, analyze_duration, entry_timestamp
+       ) 
+       select 
+         _index.datname, _index.schemaname, _index.relname, _index.indexrelname,
+         indexsize, NULL, estimated_tuples,  -- NULL for in-progress
+         NULL, NULL, now()
+       from index_pilot._remote_get_indexes_info(_index.datname, _index.schemaname, _index.relname, _index.indexrelname)
+       where indisvalid is true;
+       
+       -- COMMIT to release all locks before starting async REINDEX
        COMMIT;
        
-       perform index_pilot._reindex_index(_index.datname, _index.schemaname, _index.relname, _index.indexrelname);
+       -- Start async REINDEX CONCURRENTLY
+       -- This returns 1 if successful, 0 if failed
+       if dblink_send_query(
+           _index.datname, 
+           format('REINDEX INDEX CONCURRENTLY %I.%I', _index.schemaname, _index.indexrelname)
+       ) = 1 then
+           raise notice 'Started async REINDEX CONCURRENTLY for %.%', _index.schemaname, _index.indexrelname;
+           
+           -- IMMEDIATELY COMMIT to ensure connection stays alive
+           -- This is crucial - without this, the connection might close
+           COMMIT;
+           
+           -- Optional: Check if reindex is actually running
+           perform pg_sleep(0.5); -- Brief pause to let it start
+           
+           -- We could check pg_stat_activity here to confirm it's running
+           perform 1 from pg_stat_activity 
+           where query ilike '%reindex%concurrently%' || _index.indexrelname || '%'
+           and pid != pg_backend_pid();
+           
+           if found then
+               raise notice 'Confirmed: REINDEX is running for %.%', _index.schemaname, _index.indexrelname;
+           else
+               raise warning 'Warning: REINDEX may not be running for %.%', _index.schemaname, _index.indexrelname;
+           end if;
+       else
+           raise warning 'Failed to start async REINDEX for %.%', _index.schemaname, _index.indexrelname;
+       end if;
        
-       -- COMMIT after reindex to save the work
-       COMMIT;
-       
+       -- Clean up tracking record
        delete from index_pilot.current_processed_index
-       where
-          datname=_index.datname and
-          schemaname=_index.schemaname and
-          relname=_index.relname and
-          indexrelname=_index.indexrelname;
-          
-       -- COMMIT after cleanup
+       where datname=_index.datname 
+         and schemaname=_index.schemaname 
+         and relname=_index.relname 
+         and indexrelname=_index.indexrelname;
+       
+       -- COMMIT the cleanup
        COMMIT;
+       
+       -- Note: The completion will be detected and recorded by periodic() 
+       -- when it finds the index without _ccnew suffix and updates the NULL values
     end loop;
   return;
 end;
@@ -1445,3 +1481,57 @@ $BODY$
 language plpgsql;
 
 
+
+
+
+-- Update periodic to detect completed reindexes and update NULL values
+create or replace function index_pilot.update_completed_reindexes()
+returns void as
+$BODY$
+declare
+  _rec record;
+  _new_size bigint;
+  _duration interval;
+begin
+  -- Find reindex_history records with NULL values (in-progress)
+  for _rec in 
+    select id, datname, schemaname, relname, indexrelname, 
+           indexsize_before, entry_timestamp
+    from index_pilot.reindex_history
+    where indexsize_after is null  -- Still in progress
+      and entry_timestamp > now() - interval '24 hours'  -- Don't check ancient records
+  loop
+    -- Check if any _ccnew index exists (still reindexing)
+    perform 1 
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = _rec.schemaname
+      and c.relname ~ ('^' || _rec.indexrelname || '_ccnew[0-9]*$');
+    
+    if not found then
+      -- No _ccnew index, reindex is complete (or failed)
+      -- Get the current size
+      select pg_relation_size((quote_ident(_rec.schemaname)||'.'||quote_ident(_rec.indexrelname))::regclass)
+      into _new_size;
+      
+      if _new_size is not null then
+        -- Calculate duration
+        _duration := now() - _rec.entry_timestamp;
+        
+        -- Update the record
+        update index_pilot.reindex_history
+        set indexsize_after = _new_size,
+            reindex_duration = _duration
+        where id = _rec.id;
+        
+        raise notice 'Updated completed reindex: %.% - size %->%, duration %',
+          _rec.schemaname, _rec.indexrelname,
+          pg_size_pretty(_rec.indexsize_before),
+          pg_size_pretty(_new_size),
+          _duration;
+      end if;
+    end if;
+  end loop;
+end;
+$BODY$
+language plpgsql;
