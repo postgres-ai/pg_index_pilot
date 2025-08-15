@@ -33,7 +33,7 @@ create table index_pilot.reindex_history
 create index reindex_history_oid_index on index_pilot.reindex_history(datid, indexrelid);
 create index reindex_history_index on index_pilot.reindex_history(datname, schemaname, relname, indexrelname);
 
---history of index sizes (not really necessary to keep all this data but very useful for future analyzis of bloat trends
+--history of index sizes (not really necessary to keep all this data but very useful for future analysis of bloat trends)
 create table index_pilot.index_current_state
 (
   id bigserial primary key,
@@ -91,7 +91,7 @@ insert into index_pilot.config (key, value, comment) values
 ('index_size_threshold', '10MB', 'ignore indexes under 10MB size unless forced entries found in history'),
 ('index_rebuild_scale_factor', '2', 'rebuild indexes by default estimated bloat over 2x'),
 ('minimum_reliable_index_size', '128kB', 'small indexes not reliable to use as gauge'),
-('reindex_history_retention_period','10 years', 'reindex history default retention pcommenteriod')
+('reindex_history_retention_period','10 years', 'reindex history default retention period')
 ;
 
 --default per any DB setting
