@@ -874,11 +874,15 @@ declare
 begin
   perform index_pilot._check_structure_version();
 
-  -- Establish dblink connection before any transaction
-  if _datname = any(dblink_get_connections()) is not true then
-    perform index_pilot._dblink_connect_if_not(_datname);
-    COMMIT; -- Commit after establishing connection to avoid lock issues
+  -- Establish dblink connection if needed
+  perform index_pilot._dblink_connect_if_not(_datname);
+  -- IMPORTANT: Skip indexes in our own database to avoid deadlocks
+  -- REINDEX CONCURRENTLY via dblink in the same database causes circular waits
+  if _datname = current_database() then
+      raise warning 'Cannot REINDEX indexes in current database % via dblink - this would cause deadlocks. Use pg_cron or external scheduler instead.', _datname;
+      return;
   end if;
+  
   for _index in
     select datname, schemaname, relname, indexrelname, indexsize, estimated_bloat
     -- index_size_threshold check logic moved to get_index_bloat_estimates
@@ -947,37 +951,83 @@ begin
        from index_pilot._remote_get_indexes_info(_index.datname, _index.schemaname, _index.relname, _index.indexrelname)
        where indisvalid;
        
-       -- COMMIT to release all locks before starting async REINDEX
+       -- CRITICAL: Release ALL locks and visibility before REINDEX
+       -- This prevents deadlocks with REINDEX CONCURRENTLY
        COMMIT;
        
-       -- Start async REINDEX CONCURRENTLY
-       -- This returns 1 if successful, 0 if failed
-       if dblink_send_query(
-           _index.datname, 
-           format('REINDEX INDEX CONCURRENTLY %I.%I', _index.schemaname, _index.indexrelname)
-       ) = 1 then
-           raise notice 'Started async REINDEX CONCURRENTLY for %.%', _index.schemaname, _index.indexrelname;
+       -- Start REINDEX asynchronously and poll for completion
+       -- This avoids both deadlocks and connection closing issues
+       declare
+           _start_time timestamptz;
+           _conn_name text;
+           _query_sent boolean := false;
+           _max_wait int := 3600; -- Max 1 hour
+           _wait_time int := 0;
+           _check_interval int := 5; -- Check every 5 seconds
+       begin
+           _start_time := clock_timestamp();
+           _conn_name := 'reindex_' || _index.indexrelname || '_' || extract(epoch from now())::bigint;
            
-           -- COMMIT to release any locks this transaction might hold
-           -- This prevents deadlocks between our transaction and REINDEX CONCURRENTLY
-           COMMIT;
+           -- Create a dedicated connection for this REINDEX
+           begin
+               perform dblink_connect(_conn_name, 'dbname=' || current_database());
+               
+               -- Send async REINDEX query
+               if dblink_send_query(
+                   _conn_name,
+                   format('REINDEX INDEX CONCURRENTLY %I.%I', _index.schemaname, _index.indexrelname)
+               ) = 1 then
+                   _query_sent := true;
+                   raise notice 'Started REINDEX for %.% on connection %', 
+                                _index.schemaname, _index.indexrelname, _conn_name;
+               else
+                   raise warning 'Failed to start REINDEX for %.%', 
+                                _index.schemaname, _index.indexrelname;
+               end if;
+           exception
+               when others then
+                   raise warning 'Failed to start REINDEX %.%: %', 
+                                _index.schemaname, _index.indexrelname, SQLERRM;
+           end;
            
-           -- Optional: Check if reindex is actually running
-           perform pg_sleep(0.5); -- Brief pause to let it start
-           
-           -- We could check pg_stat_activity here to confirm it's running
-           perform 1 from pg_stat_activity 
-           where query ilike '%reindex%concurrently%' || _index.indexrelname || '%'
-           and pid <> pg_backend_pid();
-           
-           if found then
-               raise notice 'Confirmed: REINDEX is running for %.%', _index.schemaname, _index.indexrelname;
-           else
-               raise warning 'Warning: REINDEX may not be running for %.%', _index.schemaname, _index.indexrelname;
+           -- Poll for completion
+           if _query_sent then
+               while _wait_time < _max_wait loop
+                   -- Check if REINDEX is complete
+                   perform pg_sleep(_check_interval);
+                   _wait_time := _wait_time + _check_interval;
+                   
+                   -- Try to get result (non-blocking)
+                   begin
+                       perform dblink_get_result(_conn_name, false);
+                       -- If we get here, REINDEX completed
+                       raise notice 'REINDEX completed for %.% after % seconds', 
+                                    _index.schemaname, _index.indexrelname, _wait_time;
+                       exit; -- Exit the loop
+                   exception
+                       when others then
+                           -- Still running or error
+                           if position('no connection' in SQLERRM) > 0 then
+                               raise warning 'Connection lost for REINDEX %.%', 
+                                            _index.schemaname, _index.indexrelname;
+                               exit;
+                           end if;
+                           -- Still running, continue waiting
+                           if _wait_time % 60 = 0 then -- Log every minute
+                               raise notice 'Still reindexing %.% (% seconds)...', 
+                                            _index.schemaname, _index.indexrelname, _wait_time;
+                           end if;
+                   end;
+               end loop;
+               
+               -- Clean up connection
+               begin
+                   perform dblink_disconnect(_conn_name);
+               exception
+                   when others then null; -- Ignore disconnect errors
+               end;
            end if;
-       else
-           raise warning 'Failed to start async REINDEX for %.%', _index.schemaname, _index.indexrelname;
-       end if;
+       end;
        
        -- Clean up tracking record
        delete from index_pilot.current_processed_index
