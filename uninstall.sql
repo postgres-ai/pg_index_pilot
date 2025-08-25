@@ -9,8 +9,8 @@ drop schema if exists index_pilot cascade;
 drop server if exists index_pilot_self cascade;
 
 -- 3. Note about invalid indexes
--- Invalid _ccnew* indexes might exist from failed REINDEX operations
--- These could be from pg_index_pilot OR from manual operations
+-- Invalid _ccnew* indexes might exist from failed reindex operations
+-- These could be from pg_index_pilot or from manual operations
 -- To list them (but NOT automatically drop):
 do $$
 declare

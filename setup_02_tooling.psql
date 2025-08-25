@@ -115,6 +115,8 @@ begin
         raise notice 'Monitoring:';
         raise notice '  - History: SELECT * FROM index_pilot.history LIMIT 10;';
         raise notice '  - Status:  SELECT * FROM index_pilot.get_index_bloat_estimates(current_database());';
+        raise notice '';
+        raise notice 'For automated scheduling, see README.md section "Scheduling automated maintenance"';
     else
         raise warning 'Installation completed with issues. Please review the warnings above.';
     end if;

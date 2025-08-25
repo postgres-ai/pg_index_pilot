@@ -7,6 +7,9 @@ This document provides context and guidelines for AI assistants working on the p
 pg_index_pilot is an autonomous index lifecycle management tool for PostgreSQL that:
 - Automatically detects and fixes index bloat using REINDEX CONCURRENTLY
 - Uses Maxim Boguk's bloat estimation formula (works with any index type)
+- Uses control database architecture to avoid deadlocks
+- All tracking tables are centralized in control database (index_pilot_control)
+- Target databases remain clean without any pg_index_pilot installation
 - Operates in a fire-and-forget manner using dblink/postgres_fdw
 - Supports managed PostgreSQL services (RDS, Cloud SQL, etc.)
 - Requires PostgreSQL 13+ and postgres_fdw for secure operation
@@ -16,6 +19,12 @@ Please honor the rules defined in `.cursor/rules/` directory when working on thi
 - `.cursor/rules/index-pilot-rules.md` - Project-specific guidelines
 - `.cursor/rules/sql-style-guide.mdc` - SQL coding standards
 
+### File Management (CRITICAL)
+- **NEVER create new files** unless absolutely necessary
+- **ALWAYS modify existing files** instead of creating new versions
+- Experimenting or new implementations are **NOT valid reasons** for new files
+- Only create files for genuinely new functionality that doesn't fit existing structure
+- Use /tmp for temporary test files, not the repository
 ## Key Technical Decisions
 
 ### Security
