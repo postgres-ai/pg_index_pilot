@@ -19,8 +19,6 @@ begin
 end;
 $BODY$
 language plpgsql;
-
-
 drop function if exists index_pilot.check_pg14_version_bugfixed();
 create or replace function index_pilot._check_pg14_version_bugfixed()
 returns boolean as
@@ -34,8 +32,6 @@ begin
 end;
 $BODY$
 language plpgsql;
-
-
 do $$
 begin
   if current_setting('server_version_num')<'13'
@@ -58,8 +54,6 @@ begin
     end if;
   end if;
 end; $$;
-
-
 create extension if not exists dblink;
 -- alter extension dblink update;
 
@@ -73,15 +67,13 @@ end;
 $BODY$
 language plpgsql immutable;
 
-
-
 -- minimum table structure version required
 create or replace function index_pilot._check_structure_version()
 returns void as
 $BODY$
 declare
   _tables_version integer;
-  _required_version integer := 8;
+  _required_version integer := 1;
 begin
     select version into strict _tables_version from index_pilot.tables_version;
     if (_tables_version<_required_version) then
@@ -91,14 +83,12 @@ end;
 $BODY$
 language plpgsql;
 
-
-
 create or replace function index_pilot.check_update_structure_version()
 returns void as
 $BODY$
 declare
    _tables_version integer;
-   _required_version integer := 8;
+   _required_version integer := 1;
 begin
    select version into strict _tables_version from index_pilot.tables_version;
    while (_tables_version<_required_version) loop
@@ -110,105 +100,15 @@ end;
 $BODY$
 language plpgsql;
 
-
--- update table structure version from 1 to 2
-create or replace function index_pilot._structure_version_1_2()
-returns void as
-$BODY$
-begin
-   create view index_pilot.history as
-      select date_trunc('second', entry_timestamp)::timestamp as ts,
-         datname as db, schemaname as schema, relname as table,
-         indexrelname as index, indexsize_before as size_before, indexsize_after as size_after,
-         (indexsize_before::float/indexsize_after)::numeric(12,2) as ratio,
-         estimated_tuples as tuples, date_trunc('seconds', reindex_duration) as duration
-      from index_pilot.reindex_history order by id DESC;
-   update index_pilot.tables_version set version=2;
-   return;
-end;
-$BODY$
-language plpgsql;
-
-
--- update table structure version from 2 to 3
-create or replace function index_pilot._structure_version_2_3()
-returns void as
-$BODY$
-begin
-   create table if not exists index_pilot.index_current_state
-   (
-     id bigserial primary key,
-     mtime timestamptz not null default now(),
-     datname name not null,
-     schemaname name not null,
-     relname name not null,
-     indexrelname name not null,
-     indexsize bigint not null,
-     estimated_tuples bigint not null,
-     best_ratio real
-   );
-   create unique index index_current_state_index on index_pilot.index_current_state(datname, schemaname, relname, indexrelname);
-
-   update index_pilot.config set value='128kB'
-   where key='minimum_reliable_index_size' and pg_size_bytes(value)<pg_size_bytes('128kB');
-
-   with
-    _last_reindex_values as (
-    select
-      distinct on (datname, schemaname, relname, indexrelname)
-      reindex_history.datname, reindex_history.schemaname, reindex_history.relname, reindex_history.indexrelname, entry_timestamp, estimated_tuples, indexsize_after as indexsize
-      from index_pilot.reindex_history
-      order by datname, schemaname, relname, indexrelname, entry_timestamp DESC
-    ),
-    _all_history_since_reindex as (
-       -- last reindexed value
-       select _last_reindex_values.datname, _last_reindex_values.schemaname, _last_reindex_values.relname, _last_reindex_values.indexrelname, _last_reindex_values.entry_timestamp, _last_reindex_values.estimated_tuples, _last_reindex_values.indexsize
-       from _last_reindex_values
-       union all
-       -- all values since reindex or from start
-       select index_history.datname, index_history.schemaname, index_history.relname, index_history.indexrelname, index_history.entry_timestamp, index_history.estimated_tuples, index_history.indexsize
-       from index_pilot.index_history
-       left join _last_reindex_values using (datname, schemaname, relname, indexrelname)
-       where index_history.entry_timestamp>=coalesce(_last_reindex_values.entry_timestamp, '-INFINITY'::timestamp)
-    ),
-    _best_values as (
-      -- only valid best if reindex entry exists
-      select
-        distinct on (datname, schemaname, relname, indexrelname)
-        _all_history_since_reindex.*,
-        _all_history_since_reindex.indexsize::real/_all_history_since_reindex.estimated_tuples::real as best_ratio
-      from _all_history_since_reindex
-      join _last_reindex_values using (datname, schemaname, relname, indexrelname)
-      where _all_history_since_reindex.indexsize > pg_size_bytes('128kB')
-      order by datname, schemaname, relname, indexrelname, _all_history_since_reindex.indexsize::real/_all_history_since_reindex.estimated_tuples::real
-    ),
-    _current_state as (
-     select
-        distinct on (datname, schemaname, relname, indexrelname)
-        _all_history_since_reindex.*
-      from _all_history_since_reindex
-      order by datname, schemaname, relname, indexrelname, entry_timestamp DESC
-    )
-    insert into index_pilot.index_current_state
-      (mtime, datname, schemaname, relname, indexrelname, indexsize, estimated_tuples, best_ratio)
-      select c.entry_timestamp, c.datname, c.schemaname, c.relname, c.indexrelname, c.indexsize, c.estimated_tuples, best_ratio
-      from _current_state c join _best_values using (datname, schemaname, relname, indexrelname);
-   drop table index_pilot.index_history;
-   update index_pilot.tables_version set version=3;
-   return;
-end;
-$BODY$
-language plpgsql;
-
-
 -- set dblink connection for current database using FDW approach
 -- Secure connection using ONLY postgres_fdw user mapping (secure approach)
 create or replace function index_pilot._connect_securely(_datname name) returns void as
 $BODY$
 begin
-    -- Only allow connection to current database (managed services compatible mode)
-    if _datname <> current_database() then
-        raise exception 'Only current database % is supported. Cannot access database %', current_database(), _datname;
+    -- CRITICAL: Prevent deadlocks - never allow reindex in the same database
+    -- Control database architecture is REQUIRED
+    if _datname = current_database() then
+        raise exception 'Cannot connect to current database % - this causes deadlocks. pg_index_pilot must be run from a separate control database.', _datname;
     end if;
     
     -- Disconnect existing connection if any
@@ -218,10 +118,22 @@ begin
     
     -- Use ONLY postgres_fdw with user mapping (secure approach)
     -- Password is stored securely in PostgreSQL catalog, not in plain text
+    declare
+        _fdw_server_name text;
     begin
-        perform dblink_connect_u(_datname, 'index_pilot_self');
+        -- Control database architecture is REQUIRED - get the FDW server for the target database
+        select fdw_server_name into _fdw_server_name
+        from index_pilot.target_databases
+        where database_name = _datname
+        and enabled = true;
+        
+        if _fdw_server_name is null then
+            raise exception 'Target database % not registered or not enabled in index_pilot.target_databases. Control database setup required.', _datname;
+        end if;
+        
+        perform dblink_connect_u(_datname, _fdw_server_name);
     exception when others then
-        raise exception 'FDW connection failed. Please setup postgres_fdw user mapping using setup_fdw_self_connection() and setup_user_mapping(): %', sqlerrm;
+        raise exception 'FDW connection failed for database % using server %: %', _datname, _fdw_server_name, sqlerrm;
     end;
 end;
 $BODY$
@@ -231,15 +143,14 @@ create or replace function index_pilot._dblink_connect_if_not(_datname name) ret
 $BODY$
 begin
     -- Use secure FDW connection if not already connected
-    if not (_datname = any(dblink_get_connections())) then
+    -- Handle null case when no connections exist
+    if dblink_get_connections() is null or not (_datname = any(dblink_get_connections())) then
         perform index_pilot._connect_securely(_datname);
     end if;
     return;
 end;
 $BODY$
 language plpgsql;
-
-
 
 create or replace function index_pilot._remote_get_indexes_indexrelid(_datname name)
 returns table(datname name, schemaname name, relname name, indexrelname name, indexrelid oid)
@@ -301,146 +212,6 @@ begin
 end;
 $BODY$
 language plpgsql;
-
-
-
--- update table structure version from 3 to 4
-create or replace function index_pilot._structure_version_3_4()
-returns void as
-$BODY$
-declare
-  _datname name;
-begin
-   alter table index_pilot.reindex_history
-      add column indexrelid oid;
-   create index reindex_history_oid_index on index_pilot.reindex_history(datname, indexrelid);
-
-   alter table index_pilot.index_current_state
-      add column indexrelid oid;
-   create unique index index_current_state_oid_index on index_pilot.index_current_state(datname, indexrelid);
-   drop index if exists index_pilot.index_current_state_index;
-   create index index_current_state_index on index_pilot.index_current_state(datname, schemaname, relname, indexrelname);
-
-   -- add indexrelid values into index_current_state
-   for _datname in
-     select distinct datname from index_pilot.index_current_state
-     order by datname
-   loop
-     perform index_pilot._dblink_connect_if_not(_datname);
-     -- update current state of all indexes in target database
-     with _actual_indexes as (
-        select schemaname, relname, indexrelname, indexrelid
-        from index_pilot._remote_get_indexes_indexrelid(_datname)
-     )
-     update index_pilot.index_current_state as i
-        set indexrelid=_actual_indexes.indexrelid
-        from _actual_indexes
-            where
-                 i.schemaname=_actual_indexes.schemaname
-             and i.relname=_actual_indexes.relname
-             and i.indexrelname=_actual_indexes.indexrelname
-             and i.datname=_datname;
-     perform dblink_disconnect(_datname);
-   end loop;
-   delete from index_pilot.index_current_state where indexrelid is null;
-   alter table index_pilot.index_current_state alter indexrelid set not null;
-   update index_pilot.tables_version set version=4;
-   return;
-end;
-$BODY$
-language plpgsql;
-
-
--- update table structure version from 4 to 5
-create or replace function index_pilot._structure_version_4_5()
-returns void as
-$BODY$
-declare
-  _datname name;
-begin
-   alter table index_pilot.reindex_history
-      add column datid oid;
-   drop index if exists index_pilot.reindex_history_oid_index;
-   create index reindex_history_oid_index on index_pilot.reindex_history(datid, indexrelid);
-
-   alter table index_pilot.index_current_state
-      add column datid oid;
-   drop index if exists index_pilot.index_current_state_oid_index;
-   create unique index index_current_state_oid_index on index_pilot.index_current_state(datid, indexrelid);
-
-   -- add datid values into index_current_state
-  update index_pilot.index_current_state as i
-     set datid=p.oid
-     from pg_database p
-         where i.datname=p.datname;
-   delete from index_pilot.index_current_state where datid is null;
-   alter table index_pilot.index_current_state alter datid set not null;
-   update index_pilot.tables_version set version=5;
-   return;
-end;
-$BODY$
-language plpgsql;
-
-
--- update table structure version from 5 to 6
-create or replace function index_pilot._structure_version_5_6()
-returns void as
-$BODY$
-begin
-   alter table index_pilot.index_current_state
-      add column indisvalid boolean not null default true;
-   update index_pilot.tables_version set version=6;
-   return;
-end;
-$BODY$
-language plpgsql;
-
-
-
--- update table structure version from 6 to 7
-create or replace function index_pilot._structure_version_6_7()
-returns void as
-$BODY$
-begin
-   drop view if exists index_pilot.history;
-   create view index_pilot.history as
-     select date_trunc('second', entry_timestamp)::timestamp as ts,
-          datname as db, schemaname as schema, relname as table,
-          indexrelname as index, pg_size_pretty(indexsize_before) as size_before,
-          pg_size_pretty(indexsize_after) as size_after,
-          (indexsize_before::float/indexsize_after)::numeric(12,2) as ratio,
-          pg_size_pretty(estimated_tuples) as tuples, date_trunc('seconds', reindex_duration) as duration
-     from index_pilot.reindex_history order by id DESC;
-
-   update index_pilot.tables_version set version=7;
-   return;
-end;
-$BODY$
-language plpgsql;
-
-
--- update table structure version from 7 to 8
-create or replace function index_pilot._structure_version_7_8()
-returns void as
-$BODY$
-begin
-   create table if not exists index_pilot.current_processed_index
-   (
-      id bigserial primary key,
-      mtime timestamptz not null default now(),
-      datname name not null,
-      schemaname name not null,
-      relname name not null,
-      indexrelname name not null
-   );
-
-   update index_pilot.tables_version set version=8;
-   return;
-end;
-$BODY$
-language plpgsql;
-
-
 -- convert patterns from psql format to like format
 create or replace function index_pilot._pattern_convert(_var text)
 returns text as
@@ -455,8 +226,6 @@ begin
 end;
 $BODY$
 language plpgsql strict immutable;
-
-
 create or replace function index_pilot.get_setting(_datname text, _schemaname text, _relname text, _indexrelname text, _key text)
 returns text as
 $BODY$
@@ -512,8 +281,6 @@ begin
 end;
 $BODY$
 language plpgsql stable;
-
-
 create or replace function index_pilot.set_or_replace_setting(_datname text, _schemaname text, _relname text, _indexrelname text, _key text, _value text, _comment text)
 returns void as
 $BODY$
@@ -544,8 +311,6 @@ begin
 end;
 $BODY$
 language plpgsql;
-
-
 drop function if exists index_pilot._remote_get_indexes_info(name,name,name,name);
 create or replace function index_pilot._remote_get_indexes_info(_datname name, _schemaname name, _relname name, _indexrelname name)
 returns table(datid oid, indexrelid oid, datname name, schemaname name, relname name, indexrelname name, indisvalid boolean, indexsize bigint, estimated_tuples bigint)
@@ -625,8 +390,6 @@ begin
 end;
 $BODY$
 language plpgsql;
-
-
 drop function if exists index_pilot._record_indexes_info(name, name, name, name);
 create or replace function index_pilot._record_indexes_info(_datname name, _schemaname name, _relname name, _indexrelname name, _force_populate boolean default false)
 returns void
@@ -716,8 +479,6 @@ end;
 $BODY$
 language plpgsql;
 
-
-
 create or replace function index_pilot._cleanup_old_records() returns void as
 $BODY$
 begin
@@ -746,10 +507,6 @@ begin
 end;
 $BODY$
 language plpgsql;
-
-
-
-
 create or replace function index_pilot.get_index_bloat_estimates(_datname name)
 returns table(datname name, schemaname name, relname name, indexrelname name, indexsize bigint, estimated_bloat real)
 as
@@ -772,10 +529,6 @@ begin
 end;
 $BODY$
 language plpgsql strict;
-
-
-
-
 create or replace function index_pilot._reindex_index(_datname name, _schemaname name, _relname name, _indexrelname name)
 returns void
 as
@@ -793,9 +546,9 @@ declare
 begin
   -- Establish dblink connection using FDW for secure password management
   -- Use the database name as connection name (not unique per index)
-  if _datname = any(dblink_get_connections()) is not true then
-    -- Connect using postgres_fdw to avoid plain-text passwords
-    perform dblink_connect_u(_datname, 'index_pilot_self');
+  if dblink_get_connections() is null or not (_datname = any(dblink_get_connections())) then
+    -- Connect using the secure connection function which handles control database mode
+    perform index_pilot._connect_securely(_datname);
     raise notice 'Created dblink connection: %', _datname;
   end if;
 
@@ -810,7 +563,7 @@ begin
     return;
   end if;
 
-  -- perform reindex index using async dblink
+  -- perform reindex index using synchronous dblink
   _timestamp := pg_catalog.clock_timestamp ();
   
   -- Perform REINDEX CONCURRENTLY synchronously (like the original pg_index_watch)
@@ -857,8 +610,6 @@ end;
 $BODY$
 language plpgsql strict;
 
-
-
 create or replace procedure index_pilot.do_reindex(_datname name, _schemaname name, _relname name, _indexrelname name, _force boolean default false)
 as
 $BODY$
@@ -867,10 +618,15 @@ declare
 begin
   perform index_pilot._check_structure_version();
 
+  -- CRITICAL: Prevent running in the same database to avoid deadlocks
+  if _datname = current_database() then
+    raise exception 'Cannot REINDEX in current database % - this causes deadlocks. Use separate control database.', _datname;
+  end if;
+
   -- Establish dblink connection before any transaction
-  if _datname = any(dblink_get_connections()) is not true then
+  if dblink_get_connections() is null or not (_datname = any(dblink_get_connections())) then
     perform index_pilot._dblink_connect_if_not(_datname);
-    COMMIT; -- Commit after establishing connection to avoid lock issues
+    commit; -- Commit after establishing connection to avoid lock issues
   end if;
   for _index in
     select datname, schemaname, relname, indexrelname, indexsize, estimated_bloat
@@ -914,50 +670,72 @@ begin
           _index.indexrelname
        );
        
-       -- Log the reindex start with NULL values for in-progress tracking
+       -- Log the reindex start with in_progress status
+       -- Use cached data from index_current_state instead of remote call
        insert into index_pilot.reindex_history (
-         datname, schemaname, relname, indexrelname,
+         database_name, datname, schemaname, relname, indexrelname,
          indexsize_before, indexsize_after, estimated_tuples, 
-         reindex_duration, analyze_duration, entry_timestamp
+         reindex_duration, analyze_duration, entry_timestamp, status
        ) 
        select 
-         _index.datname, _index.schemaname, _index.relname, _index.indexrelname,
-         indexsize, NULL, estimated_tuples,  -- NULL for in-progress
-         NULL, NULL, now()
-       from index_pilot._remote_get_indexes_info(_index.datname, _index.schemaname, _index.relname, _index.indexrelname)
-       where indisvalid;
+         database_name, datname, schemaname, relname, indexrelname,
+         indexsize, null, estimated_tuples,  -- null until completion
+         null, null, now(), 'in_progress'
+       from index_pilot.index_current_state
+       where datname = _index.datname
+         and schemaname = _index.schemaname
+         and relname = _index.relname
+         and indexrelname = _index.indexrelname
+         and indisvalid;
        
-       -- COMMIT to release all locks before starting async REINDEX
-       COMMIT;
+       -- commit to release all locks before starting synchronous reindex
+       commit;
        
-       -- Start async REINDEX CONCURRENTLY
-       -- This returns 1 if successful, 0 if failed
-       if dblink_send_query(
-           _index.datname, 
-           format('REINDEX INDEX CONCURRENTLY %I.%I', _index.schemaname, _index.indexrelname)
-       ) = 1 then
-           raise notice 'Started async REINDEX CONCURRENTLY for %.%', _index.schemaname, _index.indexrelname;
+       -- Use synchronous REINDEX for reliability
+       -- Synchronous approach provides immediate completion tracking and avoids async complexity
+       begin
+           -- Run REINDEX CONCURRENTLY synchronously
+           perform dblink_exec(
+               _index.datname,
+               format('reindex index concurrently %I.%I', _index.schemaname, _index.indexrelname)
+           );
            
-           -- COMMIT to release any locks this transaction might hold
-           -- This prevents deadlocks between our transaction and REINDEX CONCURRENTLY
-           COMMIT;
+           raise notice 'REINDEX CONCURRENTLY completed for %.%', _index.schemaname, _index.indexrelname;
            
-           -- Optional: Check if reindex is actually running
-           perform pg_sleep(0.5); -- Brief pause to let it start
+           -- Get the final index size after reindex
+           declare
+               _final_size bigint;
+           begin
+               select indexsize into _final_size
+               from index_pilot._remote_get_indexes_info(_index.datname, _index.schemaname, _index.relname, _index.indexrelname)
+               where indisvalid;
+               
+               -- Update completion time, status, and final size in history
+               update index_pilot.reindex_history
+               set reindex_duration = clock_timestamp() - entry_timestamp,
+                   status = 'completed',
+                   indexsize_after = _final_size
+               where datname = _index.datname
+                 and schemaname = _index.schemaname
+                 and relname = _index.relname
+                 and indexrelname = _index.indexrelname
+                 and status = 'in_progress';
+           end;
+             
+       exception when others then
+           raise warning 'REINDEX failed for %.%: %', _index.schemaname, _index.indexrelname, sqlerrm;
            
-           -- We could check pg_stat_activity here to confirm it's running
-           perform 1 from pg_stat_activity 
-           where query ilike '%reindex%concurrently%' || _index.indexrelname || '%'
-           and pid <> pg_backend_pid();
-           
-           if found then
-               raise notice 'Confirmed: REINDEX is running for %.%', _index.schemaname, _index.indexrelname;
-           else
-               raise warning 'Warning: REINDEX may not be running for %.%', _index.schemaname, _index.indexrelname;
-           end if;
-       else
-           raise warning 'Failed to start async REINDEX for %.%', _index.schemaname, _index.indexrelname;
-       end if;
+           -- Mark failed entry in history with error details
+           update index_pilot.reindex_history
+           set status = 'failed',
+               error_message = sqlerrm,
+               reindex_duration = clock_timestamp() - entry_timestamp
+           where datname = _index.datname
+             and schemaname = _index.schemaname
+             and relname = _index.relname
+             and indexrelname = _index.indexrelname
+             and status = 'in_progress';
+       end;
        
        -- Clean up tracking record
        delete from index_pilot.current_processed_index
@@ -966,18 +744,15 @@ begin
          and relname=_index.relname 
          and indexrelname=_index.indexrelname;
        
-       -- COMMIT the cleanup
-       COMMIT;
+       -- commit the cleanup
+       commit;
        
-       -- Note: The completion will be detected and recorded by periodic() 
-       -- when it finds the index without _ccnew suffix and updates the NULL values
+       -- Completion tracking is handled synchronously above
     end loop;
   return;
 end;
 $BODY$
 language plpgsql;
-
-
 -- user callable shell over index_pilot._record_indexes_info(... _force_populate=>true)
 -- use to populate index bloat info from current state without reindexing
 create or replace function index_pilot.do_force_populate_index_stats(_datname name, _schemaname name, _relname name, _indexrelname name)
@@ -992,8 +767,6 @@ begin
 end;
 $BODY$
 language plpgsql;
-
-
 create or replace function index_pilot._check_lock()
 returns bigint as
 $BODY$
@@ -1010,8 +783,6 @@ begin
 end;
 $BODY$
 language plpgsql;
-
-
 create or replace procedure index_pilot._cleanup_our_not_valid_indexes() as
 $BODY$
 declare
@@ -1021,7 +792,11 @@ begin
     select datname, schemaname, relname, indexrelname from
     index_pilot.current_processed_index
   loop
-    perform index_pilot._dblink_connect_if_not(_index.datname);
+    -- Ensure we have a connection to the target database
+    if dblink_get_connections() is null or not (_index.datname = any(dblink_get_connections())) then
+        perform index_pilot._connect_securely(_index.datname);
+    end if;
+    
     if exists (select from dblink(_index.datname,
            format(
             $SQL$
@@ -1071,8 +846,6 @@ begin
 end;
 $BODY$
 language plpgsql;
-
-
 drop procedure if exists index_pilot.periodic(boolean);
 create or replace procedure index_pilot.periodic(real_run boolean default false, force boolean default false) as
 $BODY$
@@ -1101,24 +874,39 @@ begin
     select index_pilot._check_lock() into _id;
     perform index_pilot.check_update_structure_version();
 
-    -- Managed services mode: process only current database
-    delete from index_pilot.reindex_history
-    where datname = current_database()
-    and entry_timestamp < now() - coalesce(
-            index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'reindex_history_retention_period')::interval,
-            '10 years'::interval
-        );
-
-    -- Process current database
-    perform index_pilot._record_indexes_info(current_database(), null, null, null);
-
-    if real_run then
-        call index_pilot.do_reindex(current_database(), null, null, null, force);
+    -- Check if we're in control database mode
+    if exists (select 1 from pg_tables where schemaname = 'index_pilot' and tablename = 'target_databases') then
+        -- Control database mode: process all enabled target databases
+        for _datname in 
+            select database_name from index_pilot.target_databases where enabled = true
+        loop
+            -- Clean old history for this database
+            delete from index_pilot.reindex_history
+            where datname = _datname
+            and entry_timestamp < now() - coalesce(
+                    index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'reindex_history_retention_period')::interval,
+                    '10 years'::interval
+                );
+            
+            -- Record indexes for this database
+            perform index_pilot._record_indexes_info(_datname, null, null, null);
+            
+            if real_run then
+                call index_pilot.do_reindex(_datname, null, null, null, force);
+            end if;
+        end loop;
+        
+        -- Note: No need to update completed reindexes - all tracking is synchronous now
+        
+        -- Clean up any invalid _ccnew indexes from failed reindexes
+        call index_pilot._cleanup_our_not_valid_indexes();
+    else
+        -- Standalone mode (shouldn't happen with our fixes, but keep for safety)
+        raise exception 'Control database architecture required. Cannot run periodic in standalone mode.';
     end if;
 
     -- Update best_ratio for successfully completed reindexes
-    -- Since reindexes are now synchronous, we just need to update best_ratio
-    -- for recent reindex history entries
+    -- All reindexes are synchronous so this updates recent completions
     update index_pilot.index_current_state as ics
     set best_ratio = rh.indexsize_after::real / greatest(1, rh.estimated_tuples)::real
     from index_pilot.reindex_history rh
@@ -1475,62 +1263,6 @@ begin
                where srvname = 'index_pilot_self' and usename = current_user
            ) then format('Mapping exists for user %s', current_user)
            else format('Run: select index_pilot.setup_user_mapping(''%s'', ''your_password'');', current_user) end::text;
-end;
-$BODY$
-language plpgsql;
-
-
-
-
-
--- Update periodic to detect completed reindexes and update NULL values
-create or replace function index_pilot.update_completed_reindexes()
-returns void as
-$BODY$
-declare
-  _rec record;
-  _new_size bigint;
-  _duration interval;
-begin
-  -- Find reindex_history records with NULL values (in-progress)
-  for _rec in 
-    select id, datname, schemaname, relname, indexrelname, 
-           indexsize_before, entry_timestamp
-    from index_pilot.reindex_history
-    where indexsize_after is null  -- Still in progress
-      and entry_timestamp > now() - interval '24 hours'  -- Don't check ancient records
-  loop
-    -- Check if any _ccnew index exists (still reindexing)
-    perform 1 
-    from pg_class c
-    join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname = _rec.schemaname
-      and c.relname ~ ('^' || _rec.indexrelname || '_ccnew[0-9]*$');
-    
-    if not found then
-      -- No _ccnew index, reindex is complete (or failed)
-      -- Get the current size
-      select pg_relation_size((quote_ident(_rec.schemaname)||'.'||quote_ident(_rec.indexrelname))::regclass)
-      into _new_size;
-      
-      if _new_size is not null then
-        -- Calculate duration
-        _duration := now() - _rec.entry_timestamp;
-        
-        -- Update the record
-        update index_pilot.reindex_history
-        set indexsize_after = _new_size,
-            reindex_duration = _duration
-        where id = _rec.id;
-        
-        raise notice 'Updated completed reindex: %.% - size %->%, duration %',
-          _rec.schemaname, _rec.indexrelname,
-          pg_size_pretty(_rec.indexsize_before),
-          pg_size_pretty(_new_size),
-          _duration;
-      end if;
-    end if;
-  end loop;
 end;
 $BODY$
 language plpgsql;

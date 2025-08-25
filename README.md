@@ -84,7 +84,7 @@ Pros:
 - better precision than the traditional bloat estimate method for static-width columns (e.g., indexes on `bigint` or `timestamptz` columns), without the need to involve expensive `pgstattuple` scans
 
 Cons:
-- initial rebuild is required (TODO: implement import of baseline values from a fully reindexed clone)
+- initial index rebuild is required (TODO: implement import of baseline values from a fully reindexed clone)
 - for VARLENA data types (`text`, `jsonb`, etc), the method's accuracy might be affected by a "avg size drift" – in case of significant change of avg. size of indexed values, the baseline can silently shift, leading to false positive or false negative results in decision to reindex; however for large tables/indexes, the chances of this are very low
 
 ---
@@ -94,16 +94,17 @@ Cons:
 
 ## Requirements
 
-pg_index_pilot works on both self-hosted and managed PostgreSQL services:
+pg_index_pilot requires a separate control database to avoid deadlocks:
 
-### Universal Mode (Default)
+### Control Database Architecture (Required)
 - PostgreSQL version 13.0 or higher
-- **Required permissions:** The `index_pilot` user needs `USAGE` privilege on `postgres_fdw`
-- Database owner or user with appropriate permissions  
-- `dblink` extension installed (postgres_fdw not required)
-- Works with AWS RDS, Google Cloud SQL, Azure Database for PostgreSQL, and other managed services
-- Monitors current database only (simplified single-database operation)
-- Uses fire-and-forget REINDEX CONCURRENTLY for optimal performance
+- **IMPORTANT:** Requires ability to create database (not supported on TigerData, Timescale Cloud)
+- Separate control database (`index_pilot_control`) to manage target databases
+- `dblink` and `postgres_fdw` extensions installed in control database
+- Database owner or user with appropriate permissions
+- Works with AWS RDS, Google Cloud SQL, Azure Database for PostgreSQL (where database creation is allowed)
+- Manages multiple target databases from single control database
+- Uses REINDEX CONCURRENTLY from control database (avoids deadlocks)
 
 ## Recommendations 
 - If server resources allow set non-zero `max_parallel_maintenance_workers` (exact amount depends on server parameters).
@@ -111,27 +112,32 @@ pg_index_pilot works on both self-hosted and managed PostgreSQL services:
 
 ## Installation
 
-### Manual Installation (Recommended)
+### Control Database Setup (Required)
 
 ```bash
 # Clone the repository
 git clone https://gitlab.com/postgres-ai/pg_index_pilot
 cd pg_index_pilot
 
-# 1. Install schema and functions (as admin user)
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database -f index_pilot_tables.sql
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database -f index_pilot_functions.sql
+# 1. Create control database (as admin user)
+psql -h your-instance.region.rds.amazonaws.com -U postgres -c "create database index_pilot_control;"
 
-# 2. Configure secure FDW connection (as admin user)
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database \
-  -c "SELECT index_pilot.setup_fdw_self_connection('your-hostname', 5432, 'your_database');"
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database \
-  -c "SELECT index_pilot.setup_user_mapping('postgres', 'your_password');"
+# 2. Install required extensions in control database
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "CREATE EXTENSION IF NOT EXISTS postgres_fdw;"
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "CREATE EXTENSION IF NOT EXISTS dblink;"
 
-# 3. Create additional USER MAPPING for RDS/Cloud SQL admin users
-# For RDS, also map rds_superuser:
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d your_database \
-  -c "SELECT index_pilot.setup_user_mapping('rds_superuser', 'your_password');"
+# 3. Install schema and functions in control database
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_tables.sql
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_functions.sql
+
+# 4. Setup FDW connection infrastructure
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control \
+  -c "select index_pilot.setup_connection('your-instance.region.rds.amazonaws.com', 5432, 'postgres', 'your_password');"
+
+# 5. Register target databases to manage
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control \
+  -c "insert into index_pilot.target_databases (database_name, host, port, fdw_server_name) 
+      values ('your_database', 'your-instance.region.rds.amazonaws.com', 5432, 'target_your_database');"
 ```
 
 For additional troubleshooting, run `test_installation.psql` after installation.
@@ -143,15 +149,25 @@ For additional troubleshooting, run `test_installation.psql` after installation.
 git clone https://gitlab.com/postgres-ai/pg_index_pilot
 cd pg_index_pilot
 
-# 1. Install schema and functions (as superuser)
-psql -U postgres -d your_database -f index_pilot_tables.sql
-psql -U postgres -d your_database -f index_pilot_functions.sql
+# 1. Create control database (as superuser)
+psql -U postgres -c "create database index_pilot_control;"
 
-# 2. Configure secure FDW connection (as superuser)
-psql -U postgres -d your_database \
-  -c "SELECT index_pilot.setup_fdw_self_connection('localhost', 5432, 'your_database');"
-psql -U postgres -d your_database \
-  -c "SELECT index_pilot.setup_user_mapping('postgres', '');"  # Empty password for local socket connection
+# 2. Install required extensions in control database (as superuser)
+psql -U postgres -d index_pilot_control -c "CREATE EXTENSION IF NOT EXISTS postgres_fdw;"
+psql -U postgres -d index_pilot_control -c "CREATE EXTENSION IF NOT EXISTS dblink;"
+
+# 3. Install schema and functions in control database (as superuser)
+psql -U postgres -d index_pilot_control -f index_pilot_tables.sql
+psql -U postgres -d index_pilot_control -f index_pilot_functions.sql
+
+# 4. Setup FDW connection infrastructure (as superuser)
+psql -U postgres -d index_pilot_control \
+  -c "select index_pilot.setup_connection('127.0.0.1', 5432, 'postgres', 'postgres');"  # Use actual password
+
+# 5. Register target databases to manage
+psql -U postgres -d index_pilot_control \
+  -c "insert into index_pilot.target_databases (database_name, host, port, fdw_server_name) 
+      values ('your_database', '127.0.0.1', 5432, 'target_your_database');"
 ```
 
 ## Initial launch
@@ -172,17 +188,78 @@ nohup psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_data
 
 ## Scheduling automated maintenance
 
-### Scheduling Options
+### Choosing the right schedule
 
-### Using pg_cron (Recommended for managed services)
+The optimal maintenance schedule depends on your database characteristics:
+
+**Daily maintenance (recommended for):**
+- High-traffic databases with frequent updates
+- Databases where index bloat accumulates quickly
+- Systems with sufficient maintenance windows each night
+- When you want to catch and fix bloat early
+
+**Weekly maintenance (recommended for):**
+- Stable databases with predictable workloads
+- Systems where index bloat accumulates slowly
+- Production systems where daily maintenance might be disruptive
+- Databases with limited maintenance windows
+
+### Using pg_cron (Recommended)
+
+**Step 1: Check where pg_cron is installed**
+```sql
+-- Find which database has pg_cron
+show cron.database_name;
+```
+
+**Step 2: Schedule jobs from the pg_cron database**
 
 ```sql
--- Install pg_cron extension (available on managed services)
-CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- Connect to the database shown in step 1
+\c postgres_ai  -- or whatever cron.database_name shows
 
--- Schedule nightly reindexing at 2 AM  
-SELECT cron.schedule('index-maintenance', '0 2 * * *', 
-    'CALL index_pilot.periodic(true);'
+-- Daily maintenance at 2 AM
+select cron.schedule_in_database(
+    'pg_index_pilot_daily',
+    '0 2 * * *',
+    'select index_pilot.periodic(real_run := true);',
+    'index_pilot_control'  -- Run in control database
+);
+
+-- Monitoring every 6 hours (no actual reindex)
+select cron.schedule_in_database(
+    'pg_index_pilot_monitor',
+    '0 */6 * * *',
+    'select index_pilot.periodic(real_run := false);',
+    'index_pilot_control'
+);
+
+-- OR weekly maintenance on Sunday at 2 AM
+select cron.schedule_in_database(
+    'pg_index_pilot_weekly',
+    '0 2 * * 0',
+    'select index_pilot.periodic(real_run := true);',
+    'index_pilot_control'
+);
+```
+
+**Step 3: Verify and manage schedules**
+```sql
+-- View scheduled jobs
+select jobname, schedule, command, database, active 
+from cron.job 
+where jobname like 'pg_index_pilot%';
+
+-- Disable a schedule
+select cron.unschedule('pg_index_pilot_daily');
+
+-- Change schedule time
+select cron.unschedule('pg_index_pilot_daily');
+select cron.schedule_in_database(
+    'pg_index_pilot_daily', 
+    '0 3 * * *',  -- New time: 3 AM
+    'select index_pilot.periodic(real_run := true);',
+    'index_pilot_control'
 );
 ```
 
@@ -247,16 +324,38 @@ psql -1 -d your_database -f index_pilot_functions.sql
 
 ### View Reindexing History
 ```sql
--- Show recent reindexing operations
+-- Show recent reindexing operations with status
 select 
     schemaname, relname, indexrelname,
     pg_size_pretty(indexsize_before::bigint) as size_before,
     pg_size_pretty(indexsize_after::bigint) as size_after,
     reindex_duration,
+    status,
+    case when error_message is not null then left(error_message, 50) else null end as error,
     entry_timestamp
 from index_pilot.reindex_history 
 order by entry_timestamp desc 
 limit 20;
+
+-- Show only failed reindexes for debugging
+select 
+    schemaname, relname, indexrelname,
+    pg_size_pretty(indexsize_before::bigint) as size_before,
+    reindex_duration,
+    error_message,
+    entry_timestamp
+from index_pilot.reindex_history 
+where status = 'failed'
+order by entry_timestamp desc;
+```
+
+**💡 Tip:** Use the convenient `index_pilot.history` view for formatted output:
+```sql
+-- View recent operations with formatted sizes and status
+select * from index_pilot.history limit 20;
+
+-- View only failed operations
+select * from index_pilot.history where status = 'failed';
 ```
 
 ### Check Current Bloat Status
@@ -331,35 +430,34 @@ The system uses an optimized "fire-and-forget" approach for `REINDEX CONCURRENTL
 **How it works:**
 1. **Connection Management**: 
    - dblink connection established via postgres_fdw USER MAPPING (no plain-text passwords)
-   - Connection created in PROCEDURE (not function) so it survives COMMIT statements
+   - Connection created in procedure (not function) so it survives commit statements
    - Connection kept alive for reuse across multiple indexes
 
 2. **Deadlock Prevention**:
-   - Insert tracking record with NULL values (marks as in-progress)
-   - `COMMIT` to release all locks before starting REINDEX
-   - Start async `REINDEX CONCURRENTLY` via `dblink_send_query()`
-   - `COMMIT` again to release any catalog locks from dblink itself
+   - `commit` to release all locks before starting reindex
+   - Execute synchronous `REINDEX CONCURRENTLY` via `dblink_exec()`
    - REINDEX runs in separate transaction via dblink (no lock conflicts)
+   - Connection kept alive for reuse across multiple indexes
 
 3. **Progress Tracking**:
-   - Initial record has NULL for `indexsize_after` and `reindex_duration`
-   - Function `update_completed_reindexes()` runs periodically (every 30 min)
-   - Detects completion when no `_ccnew` index exists
-   - Updates NULL values with actual size and duration
+   - Records start time before reindex operation
+   - Waits for completion (synchronous operation)
+   - Immediately records final size and duration after completion
+   - No periodic job needed - all tracking is real-time
 
 **Benefits:**
-- ✅ No deadlocks (proper lock management with COMMIT)
-- ✅ No hanging or timeouts (true async operation)
-- ✅ Multiple indexes can be reindexed simultaneously
+- ✅ No deadlocks (proper lock management with commit)
+- ✅ No hanging or timeouts (reliable synchronous operation)
+- ✅ Immediate completion tracking (no waiting for periodic jobs)
 - ✅ Secure password management via postgres_fdw
 - ✅ Works on managed services (RDS, Cloud SQL, Azure)
 
 **Trade-offs:**
-- ⚠️ Results not immediate (updated by periodic job)
-- ⚠️ Requires PROCEDURE support (PostgreSQL 11+)
+- ⚠️ Sequential processing (one index at a time per connection)
+- ⚠️ Requires procedure support (PostgreSQL 11+)
 - ⚠️ Needs postgres_fdw for secure connections
 
-This architecture specifically addresses the challenge of running `REINDEX CONCURRENTLY` from within a transaction context while maintaining security and preventing deadlocks.
+This architecture specifically addresses the challenge of running `REINDEX CONCURRENTLY` from within a transaction context while maintaining security, preventing deadlocks, and providing reliable completion tracking.
 
 ## Managed Services Setup
 
@@ -390,7 +488,7 @@ Test the fire-and-forget REINDEX on a small index:
 
 ```sql
 -- Test REINDEX on a specific index
-CALL index_pilot.do_reindex(
+call index_pilot.do_reindex(
     current_database(),
     'schema_name',
     'table_name', 
@@ -399,19 +497,19 @@ CALL index_pilot.do_reindex(
 );
 
 -- Check active REINDEX processes
-SELECT count(*) FROM pg_stat_activity 
-WHERE query ILIKE '%REINDEX%' AND state = 'active';
+select count(*) from pg_stat_activity 
+where query ilike '%REINDEX%' and state = 'active';
 
 -- Check reindex history
-SELECT 
+select 
     schemaname, relname, indexrelname,
     pg_size_pretty(indexsize_before::bigint) as size_before,
     pg_size_pretty(indexsize_after::bigint) as size_after,
     reindex_duration,
     entry_timestamp
-FROM index_pilot.reindex_history 
-ORDER BY entry_timestamp DESC 
-LIMIT 5;
+from index_pilot.reindex_history 
+order by entry_timestamp desc 
+limit 5;
 ```
 
 ## Testing Results
@@ -423,7 +521,7 @@ The system has been thoroughly tested on managed PostgreSQL services with the fo
 - **Secure FDW connections** - Using postgres_fdw USER MAPPING
 - **Automatic bloat detection** - Maxim Boguk's formula working correctly
 - **History tracking** - Complete reindex operations logged
-- **Permission management** - Proper GRANT USAGE on postgres_fdw
+- **Permission management** - Proper grant usage on postgres_fdw
 
 ### 📊 **Performance Results:**
 - **Index size reduction:** Up to 85.4% (4.3MB → 0.6MB in real test)
@@ -438,7 +536,7 @@ The system uses **secure postgres_fdw USER MAPPING** for password management:
 **How it works:**
 1. **Password provided ONCE** during setup:
    ```sql
-   SELECT index_pilot.setup_connection(
+   select index_pilot.setup_connection(
        'your_secure_password',  -- Password provided only here
        'your-instance.region.rds.amazonaws.com',
        5432,
@@ -446,10 +544,10 @@ The system uses **secure postgres_fdw USER MAPPING** for password management:
    );
    ```
 
-2. **Password stored securely** in PostgreSQL catalog via `CREATE USER MAPPING`
+2. **Password stored securely** in PostgreSQL catalog via user mapping
 3. **No password needed** for subsequent operations:
    ```sql
-   CALL index_pilot.do_reindex(
+   call index_pilot.do_reindex(
        current_database(),
        'schema_name',
        'table_name', 
@@ -470,19 +568,19 @@ The system uses **secure postgres_fdw USER MAPPING** for password management:
 **Self-hosted PostgreSQL:**
 ```sql
 -- Basic permissions (handled by setup_01_user.psql)
-GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO index_pilot;
+grant usage on foreign data wrapper postgres_fdw to index_pilot;
 ```
 
 **Managed services (RDS/Cloud SQL):**
 ```sql
 -- May need additional grants by admin user
-GRANT EXECUTE ON FUNCTION dblink_connect_u(text,text) TO index_pilot;
+grant execute on function dblink_connect_u(text,text) to index_pilot;
 
 -- Create USER MAPPING for admin users (required for managed services compatibility)
-CREATE USER MAPPING IF NOT EXISTS FOR postgres SERVER index_pilot_self 
-  OPTIONS (user 'index_pilot', password 'your_secure_password');
-CREATE USER MAPPING IF NOT EXISTS FOR rds_superuser SERVER index_pilot_self 
-  OPTIONS (user 'index_pilot', password 'your_secure_password');
+create user mapping if not exists for postgres server index_pilot_self 
+  options (user 'index_pilot', password 'your_secure_password');
+create user mapping if not exists for rds_superuser server index_pilot_self 
+  options (user 'index_pilot', password 'your_secure_password');
 ```
 
 ### 🚀 **Production Ready:**

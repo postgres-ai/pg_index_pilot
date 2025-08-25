@@ -12,11 +12,26 @@ end; $$;
 
 create schema if not exists index_pilot;
 
+-- Additional table for control database architecture
+-- Only create if we're running as a control database
+create table if not exists index_pilot.target_databases (
+    id serial primary key,
+    database_name name not null unique,
+    host text not null default 'localhost',
+    port integer not null default 5432,
+    fdw_server_name name not null unique,
+    enabled boolean default true,
+    added_at timestamptz default now(),
+    last_checked timestamptz,
+    notes text
+);
+
 --history of performed reindex action
 create table index_pilot.reindex_history
 (
   id bigserial primary key,
   entry_timestamp timestamptz not null default now(),
+  database_name name, -- Added for control database: which target database
   indexrelid oid,
   datid oid,
   datname name not null,
@@ -25,11 +40,16 @@ create table index_pilot.reindex_history
   indexrelname name not null,
   server_version_num integer not null default current_setting('server_version_num')::integer,
   indexsize_before bigint not null,
-  indexsize_after bigint,  -- NULL while reindex is in progress
+  indexsize_after bigint,  -- null while reindex is in progress or failed
   estimated_tuples bigint not null,
-  reindex_duration interval,  -- NULL while reindex is in progress
-  analyze_duration interval  -- NULL while reindex is in progress
+  reindex_duration interval,  -- null while reindex is in progress or failed
+  analyze_duration interval,  -- null while reindex is in progress or failed
+  status text not null default 'completed',
+  error_message text
 );
+alter table index_pilot.reindex_history
+  add constraint reindex_history_status_check 
+  check (status in ('in_progress', 'completed', 'failed'));
 create index reindex_history_oid_index on index_pilot.reindex_history(datid, indexrelid);
 create index reindex_history_index on index_pilot.reindex_history(datname, schemaname, relname, indexrelname);
 
@@ -38,6 +58,7 @@ create table index_pilot.index_current_state
 (
   id bigserial primary key,
   mtime timestamptz not null default now(),
+  database_name name, -- Added for control database: which target database
   indexrelid oid not null,
   datid oid not null,
   datname name not null,
@@ -76,14 +97,18 @@ alter table index_pilot.config add constraint inherit_check3 check (schemaname  
 
 create view index_pilot.history as
   select date_trunc('second', entry_timestamp)::timestamp as ts,
-       datname as db, schemaname as schema, relname as table,
+       -- Use database_name when running as control database, datname when standalone
+       case when database_name is not null then database_name else datname end as db, 
+       schemaname as schema, relname as table,
        indexrelname as index, pg_size_pretty(indexsize_before) as size_before,
        pg_size_pretty(indexsize_after) as size_after,
        case when indexsize_after is not null and indexsize_after > 0 
             then (indexsize_before::float/indexsize_after)::numeric(12,2) 
             else null end as ratio,
-       pg_size_pretty(estimated_tuples) as tuples, date_trunc('seconds', reindex_duration) as duration
-  from index_pilot.reindex_history order by id DESC;
+       estimated_tuples as tuples, date_trunc('seconds', reindex_duration) as duration,
+       status,
+       case when error_message is not null then left(error_message, 100) else null end as error
+  from index_pilot.reindex_history order by id desc;
 
 
 --default GLOBAL settings
@@ -107,7 +132,7 @@ create table index_pilot.tables_version
 	version smallint not null
 );
 create unique index tables_version_single_row on  index_pilot.tables_version((version is not null));
-insert into index_pilot.tables_version values(8);
+insert into index_pilot.tables_version values(1);
 
 
 -- current processed index can be invalid
@@ -115,6 +140,7 @@ create table index_pilot.current_processed_index
 (
   id bigserial primary key,
   mtime timestamptz not null default now(),
+  database_name name, -- Added for control database: which target database
   datname name not null,
   schemaname name not null,
   relname name not null,

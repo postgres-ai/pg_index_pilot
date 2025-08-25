@@ -39,10 +39,10 @@ end $$;
 -- 3. Test SQL injection protection in function parameters
 do $$
 begin
-    -- Try to inject SQL in schema name
+    -- Try to inject SQL in database name
     begin
         perform index_pilot.get_index_bloat_estimates(
-            current_database() || '; drop table index_pilot.config; --'
+            (select database_name from index_pilot.target_databases where enabled = true limit 1) || '; drop table index_pilot.config; --'
         );
         -- If we get here, the injection attempt was properly handled
         raise notice 'PASS: SQL injection protection working (database name)';
@@ -126,7 +126,7 @@ begin
     -- Try to access pg_authid (superuser only)
     begin
         perform index_pilot._remote_get_indexes_info(
-            current_database(), 
+            (select database_name from index_pilot.target_databases where enabled = true limit 1), 
             'pg_catalog', 
             'pg_authid', 
             null
