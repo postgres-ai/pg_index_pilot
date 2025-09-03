@@ -19,6 +19,191 @@ begin
 end;
 $BODY$
 language plpgsql;
+
+-- Preflight environment check aggregating key requirements and setup status
+create or replace function index_pilot.check_environment()
+returns table(component text, is_ok boolean, details text) as
+$BODY$
+declare
+  _missing_permissions_count integer;
+  _res record;
+  _fdw_self_ok boolean := false;
+begin
+  -- PostgreSQL version
+  return query 
+  select 
+    'PostgreSQL version (>=13)'::text,
+    (current_setting('server_version_num')::int >= 130000),
+    current_setting('server_version');
+
+  -- Known bugfix statuses
+  return query 
+  select 
+    'Known bugs fixed (PG12/13/14 chain)'::text,
+    index_pilot._check_pg_version_bugfixed(),
+    case when index_pilot._check_pg_version_bugfixed() then 'Minor version is safe' else 'Upgrade to latest minor recommended' end;
+
+  return query 
+  select 
+    'PG14 bug #17485 fixed'::text,
+    index_pilot._check_pg14_version_bugfixed(),
+    case when index_pilot._check_pg14_version_bugfixed() then 'Not affected' else 'Update to 14.4 or newer' end;
+
+  -- Extensions
+  return query 
+  select 
+    'Extension: dblink'::text,
+    exists (select 1 from pg_extension where extname = 'dblink'),
+    'Run: create extension dblink;';
+
+  return query 
+  select 
+    'Extension: postgres_fdw'::text,
+    exists (select 1 from pg_extension where extname = 'postgres_fdw'),
+    'Run: create extension postgres_fdw;';
+
+  -- Schema presence
+  return query 
+  select 
+    'Schema: index_pilot'::text,
+    exists (select 1 from pg_namespace where nspname = 'index_pilot'),
+    '';
+
+  -- Required tables
+  for _res in
+    select unnest(array['config','index_current_state','reindex_history','current_processed_index','tables_version']) as tbl
+  loop
+    return query
+    select 
+      format('Table: index_pilot.%s', _res.tbl),
+      exists (
+        select 1 from information_schema.tables 
+        where table_schema = 'index_pilot' and table_name = _res.tbl
+      ),
+      '';
+  end loop;
+
+  -- Core routines presence
+  return query 
+  select 
+    'Function: index_pilot.version()'::text,
+    exists (
+      select 1 from pg_proc p join pg_namespace n on p.pronamespace = n.oid
+      where n.nspname = 'index_pilot' and p.proname = 'version'
+    ),
+    '';
+
+  return query 
+  select 
+    'Procedure: index_pilot.periodic'::text,
+    exists (
+      select 1 from pg_proc p join pg_namespace n on p.pronamespace = n.oid
+      where n.nspname = 'index_pilot' and p.proname = 'periodic'
+    ),
+    '';
+
+  return query
+  select 
+    'Procedure: index_pilot.do_reindex'::text,
+    exists (
+      select 1 from pg_proc p join pg_namespace n on p.pronamespace = n.oid
+      where n.nspname = 'index_pilot' and p.proname = 'do_reindex'
+    ),
+    '';
+
+  return query 
+  select 
+    'Function: index_pilot.get_index_bloat_estimates'::text,
+    exists (
+      select 1 from pg_proc p join pg_namespace n on p.pronamespace = n.oid
+      where n.nspname = 'index_pilot' and p.proname = 'get_index_bloat_estimates'
+    ),
+    '';
+
+  return query 
+  select 
+    'Function: index_pilot.check_permissions'::text,
+    exists (
+      select 1 from pg_proc p join pg_namespace n on p.pronamespace = n.oid
+      where n.nspname = 'index_pilot' and p.proname = 'check_permissions'
+    ),
+    '';
+
+  -- Permissions summary
+  select 
+    count(*) into _missing_permissions_count 
+  from index_pilot.check_permissions() as p 
+  where p.status = false;
+
+  return query 
+  select 
+    'Permissions summary'::text,
+    (_missing_permissions_count = 0),
+    format('Missing: %s', _missing_permissions_count);
+
+  -- FDW security status (detailed lines)
+  for _res in select * from index_pilot.check_fdw_security_status() loop
+    return query 
+    select 
+      format('FDW: %s', _res.component)::text,
+      (lower(_res.status) in ('ok','installed','granted','exists','secure','configured')),
+      _res.details::text;
+  end loop;
+
+  -- Control DB architecture checks
+  return query 
+  select 
+    'Control DB: table index_pilot.target_databases'::text,
+    exists (
+      select 1 from information_schema.tables where table_schema = 'index_pilot' and table_name = 'target_databases'
+    ),
+    'Required for multi-database control mode';
+
+  if exists (
+    select 1 
+    from information_schema.tables
+    where 
+      table_schema = 'index_pilot' 
+      and table_name = 'target_databases'
+  ) then
+    return query 
+    select 
+      'Control DB: registered targets'::text,
+      ((select count(*) from index_pilot.target_databases where enabled) > 0),
+      (select count(*)::text from index_pilot.target_databases);
+
+    return query 
+    select 
+      'Safety: current DB not listed as target'::text,
+      not exists (
+        select 1 
+        from index_pilot.target_databases 
+        where database_name = current_database()
+        ),
+      'Do not register the control database as a target';
+  end if;
+
+  -- Best-effort FDW connectivity test
+  begin
+    perform dblink_connect_u('env_test', 'index_pilot_self');
+    perform dblink_disconnect('env_test');
+    _fdw_self_ok := true;
+    exception when others then
+    _fdw_self_ok := false;
+  end;
+
+  return query 
+    select 
+    'FDW self-connection test'::text,
+    _fdw_self_ok,
+    case when _fdw_self_ok then 'Connected via user mapping' else 'Run setup_fdw_self_connection() and setup_user_mapping()' end;
+
+  return;
+end;
+$BODY$
+language plpgsql;
+
+
 drop function if exists index_pilot.check_pg14_version_bugfixed();
 create or replace function index_pilot._check_pg14_version_bugfixed()
 returns boolean as

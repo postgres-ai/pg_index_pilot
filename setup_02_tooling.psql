@@ -58,6 +58,10 @@ select * from index_pilot.check_permissions();
 \echo 'Checking FDW configuration status...'
 select * from index_pilot.check_fdw_security_status();
 
+-- Preflight environment check
+\echo 'Environment preflight summary:'
+select * from index_pilot.check_environment();
+
 -- Final verification
 do $$
 declare
