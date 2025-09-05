@@ -112,6 +112,40 @@ pg_index_pilot requires a separate control database to avoid deadlocks:
 
 ## Installation
 
+### Quick install via install.sh
+
+```bash
+# Clone the repository
+git clone https://gitlab.com/postgres-ai/pg_index_pilot
+cd pg_index_pilot
+
+# 1) Install into control database (auto-creates DB, installs extensions/objects)
+PGPASSWORD='your_password' \
+  ./install.sh install-control \
+  -H your_host -U your_user -C your_control_db_name
+
+# 2) Register a target database via FDW (secure user mapping)
+PGPASSWORD='your_password' \
+  ./install.sh register-target \
+  -H your_host -U your_user -C your_control_db_name \
+  -T your_database --fdw-host your_host
+
+# 3) Verify installation and environment
+PGPASSWORD='your_password' \
+  ./install.sh verify \
+  -H your_host -U your_user -C your_control_db_name
+
+# (Optional) Uninstall
+PGPASSWORD='your_password' \
+  ./install.sh uninstall \
+  -H your_host -U your_user -C your_control_db_name --drop-servers
+```
+
+Notes:
+- Use `PGPASSWORD` to avoid echoing secrets; the script won’t print passwords.
+- `--fdw-host` should be reachable from the database server itself (in Docker/CI it might be `postgres`, `127.0.0.1`, or the container IP).
+- For self-hosted replace host with `127.0.0.1`. For managed services ensure the admin user can `create database` and `create extension`.
+
 ### Control Database Setup (Required)
 
 ```bash
@@ -182,7 +216,7 @@ export PGSSLMODE=require
 export PGPASSWORD='your_index_pilot_password'
 
 # Run initial analysis and reindexing
-nohup psql -h your-instance.region.rds.amazonaws.com -U index_pilot -d your_database \
+nohup psql -h your_host -U index_pilot -d your_database \
   -qXt -c "call index_pilot.periodic(true)" >> index_pilot.log 2>&1
 ```
 
