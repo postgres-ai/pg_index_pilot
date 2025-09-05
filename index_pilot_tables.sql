@@ -15,15 +15,15 @@ create schema if not exists index_pilot;
 -- Additional table for control database architecture
 -- Only create if we're running as a control database
 create table if not exists index_pilot.target_databases (
-    id serial primary key,
-    database_name name not null unique,
-    host text not null default 'localhost',
-    port integer not null default 5432,
-    fdw_server_name name not null unique,
-    enabled boolean default true,
-    added_at timestamptz default now(),
-    last_checked timestamptz,
-    notes text
+  id serial primary key,
+  database_name name not null unique,
+  host text not null default 'localhost',
+  port integer not null default 5432,
+  fdw_server_name name not null unique,
+  enabled boolean default true,
+  added_at timestamptz default now(),
+  last_checked timestamptz,
+  notes text
 );
 
 --history of performed reindex action
@@ -47,9 +47,11 @@ create table index_pilot.reindex_history
   status text not null default 'completed',
   error_message text
 );
+
 alter table index_pilot.reindex_history
   add constraint reindex_history_status_check 
   check (status in ('in_progress', 'completed', 'failed'));
+
 create index reindex_history_oid_index on index_pilot.reindex_history(datid, indexrelid);
 create index reindex_history_index on index_pilot.reindex_history(datname, schemaname, relname, indexrelname);
 
@@ -97,17 +99,17 @@ alter table index_pilot.config add constraint inherit_check3 check (schemaname  
 
 create view index_pilot.history as
   select date_trunc('second', entry_timestamp)::timestamp as ts,
-       -- Use database_name when running as control database, datname when standalone
-       case when database_name is not null then database_name else datname end as db, 
-       schemaname as schema, relname as table,
-       indexrelname as index, pg_size_pretty(indexsize_before) as size_before,
-       pg_size_pretty(indexsize_after) as size_after,
-       case when indexsize_after is not null and indexsize_after > 0 
-            then (indexsize_before::float/indexsize_after)::numeric(12,2) 
-            else null end as ratio,
-       estimated_tuples as tuples, date_trunc('seconds', reindex_duration) as duration,
-       status,
-       case when error_message is not null then left(error_message, 100) else null end as error
+    -- Use database_name when running as control database, datname when standalone
+    case when database_name is not null then database_name else datname end as db, 
+    schemaname as schema, relname as table,
+    indexrelname as index, pg_size_pretty(indexsize_before) as size_before,
+    pg_size_pretty(indexsize_after) as size_after,
+    case when indexsize_after is not null and indexsize_after > 0 
+      then (indexsize_before::float/indexsize_after)::numeric(12,2) 
+      else null end as ratio,
+    estimated_tuples as tuples, date_trunc('seconds', reindex_duration) as duration,
+    status,
+    case when error_message is not null then left(error_message, 100) else null end as error
   from index_pilot.reindex_history order by id desc;
 
 
@@ -122,8 +124,7 @@ insert into index_pilot.config (key, value, comment) values
 --default per any DB setting
 insert into index_pilot.config (datname, schemaname, relname, indexrelname, key, value, comment) values
 ('*', 'repack', null,      null, 'skip', 'true', 'skip repack internal schema'),
-('*', 'pgq',    'event_*', null, 'skip', 'true', 'skip pgq transient tables')
-;
+('*', 'pgq',    'event_*', null, 'skip', 'true', 'skip pgq transient tables');
 
 
 --current version of table structure
