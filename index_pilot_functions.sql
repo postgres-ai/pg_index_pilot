@@ -253,7 +253,7 @@ create or replace function index_pilot.version()
 returns text as
 $BODY$
 begin
-  return '1.04';
+  return '0.1.0';
 end;
 $BODY$
 language plpgsql immutable;
