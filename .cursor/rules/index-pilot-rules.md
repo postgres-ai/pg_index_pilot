@@ -28,10 +28,28 @@
 - Always test on real PostgreSQL instances
 
 ### Git Commits
-- Keep commit messages under 72 characters for first line
+- Follow simplified Conventional Commits for the subject line
+- Keep first line under 72 characters
 - Use present tense ("Add feature" not "Added feature")
+- Supported types drive release notes:
+  - `feat:` new functionality (MINOR)
+  - `fix:` bug fix (PATCH)
+  - `perf:` performance improvement (PATCH)
+  - `docs:` documentation only (no release)
+  - `chore:` infra, CI, dependencies (no release)
+  - `test:` tests only (no release)
+  - `refactor:` refactor without API changes (no release)
+- Breaking changes: append `!` after the type, e.g. `feat!: drop support for Postgres 13`
+- MR/PR titles should match the main commit subject
 - No emojis except 🤖 for automated fixes
-- Reference issues when applicable
+- Reference issues when applicable (e.g., `Closes #123`)
+
+Examples:
+- `feat: add dry-run mode for automatic reindex`
+- `fix: avoid deadlock on REINDEX CONCURRENTLY`
+- `perf: reduce lock time by 20%`
+- `docs: update PG 13–17 support matrix`
+- `refactor!: remove legacy flag`
 
 ## Project-Specific Rules
 
