@@ -21,7 +21,7 @@ begin
   
   -- Clean up from any previous test runs
   delete from index_pilot.reindex_history where schemaname = 'test_reindex';
-  delete from index_pilot.index_current_state where schemaname = 'test_reindex';
+  delete from index_pilot.index_latest_state where schemaname = 'test_reindex';
   
   -- Connect to target database
   perform index_pilot._connect_securely(_target_db);
@@ -230,7 +230,7 @@ begin
   
   -- Clean up control database tracking tables
   delete from index_pilot.reindex_history where schemaname = 'test_reindex';
-  delete from index_pilot.index_current_state where schemaname = 'test_reindex';
+  delete from index_pilot.index_latest_state where schemaname = 'test_reindex';
   raise notice 'PASS: Test cleanup completed';
 end $$;
 
