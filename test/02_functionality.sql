@@ -95,7 +95,7 @@ begin
   
   -- Verify indexes were detected
   select count(*) into _count 
-  from index_pilot.index_current_state 
+  from index_pilot.index_latest_state 
   where schemaname = 'test_pilot';
   
   if _count < 4 then
@@ -125,7 +125,7 @@ declare
   _count integer;
 begin
   select count(*) into _count 
-  from index_pilot.index_current_state 
+  from index_pilot.index_latest_state 
   where schemaname = 'test_pilot' 
   and best_ratio is not null;
   
@@ -199,7 +199,7 @@ begin
   );
   
   -- Clean up control database tracking tables
-  delete from index_pilot.index_current_state where schemaname = 'test_pilot';
+  delete from index_pilot.index_latest_state where schemaname = 'test_pilot';
   delete from index_pilot.reindex_history where schemaname = 'test_pilot';
   raise notice 'PASS: Test cleanup completed';
 end $$;

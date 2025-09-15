@@ -66,7 +66,7 @@ Please honor the rules defined in `.cursor/rules/` directory when working on thi
 - `get_index_bloat_estimates()` - Returns bloat information
 
 ### Critical Tables
-- `index_current_state` - Current state of all indexes
+- `index_latest_state` - Latest state of index metrics for bloat analysis
 - `reindex_history` - History of reindex operations
 - `config` - Configuration parameters
 - `current_processed_index` - Tracks in-progress operations

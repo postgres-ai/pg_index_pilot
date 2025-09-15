@@ -72,7 +72,7 @@ begin
 
   -- Required tables
   for _res in
-    select unnest(array['config','index_current_state','reindex_history','current_processed_index','tables_version']) as tbl
+    select unnest(array['config','index_latest_state','reindex_history','current_processed_index','tables_version']) as tbl
   loop
     return query
     select 
@@ -682,15 +682,15 @@ begin
   -- Establish dblink connection for managed services mode
   perform index_pilot._dblink_connect_if_not(_datname);
   
-  -- merge index data fetched from the database and index_current_state
+  -- merge index data fetched from the database and index_latest_state
   -- now keep info about all potentially interesting indexes (even small ones)
-  -- we can do it now because we keep exactly one entry in index_current_state per index (without history)
+  -- we can do it now because we keep exactly one entry in index_latest_state per index (without history)
   with _actual_indexes as (
     select datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples
     from index_pilot._remote_get_indexes_info(_datname, _schemaname, _relname, _indexrelname)
   ),
   _old_indexes as (
-    delete from index_pilot.index_current_state as i
+    delete from index_pilot.index_latest_state as i
     where not exists (
       select from _actual_indexes
       where
@@ -703,17 +703,17 @@ begin
     and (_indexrelname is null or i.indexrelname=_indexrelname)
   )
   -- todo: do something with ugly code duplication in index_pilot._reindex_index and index_pilot._record_indexes_info
-  insert into index_pilot.index_current_state as i
-  (datid, indexrelid, datname, schemaname, relname, indexrelname, indisvalid, indexsize, estimated_tuples, best_ratio)
+  insert into index_pilot.index_latest_state as i
+  (datid, datname, schemaname, relname, indexrelid, indexrelname, indexsize, indisvalid, estimated_tuples, best_ratio)
   select 
     datid, 
-    indexrelid, 
     datname, 
     schemaname, 
     relname, 
+    indexrelid, 
     indexrelname, 
+    indexsize,
     indisvalid, 
-    indexsize, 
     estimated_tuples,
   case
   -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
@@ -740,7 +740,7 @@ begin
       -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
       when (_force_populate and excluded.indexsize > pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
         then excluded.indexsize::real/excluded.estimated_tuples::real
-      -- if the new index size less than minimum_reliable_index_size - we cannot use it's size and tuples as reliable gauge for the best_ratio
+      -- if the new index size less than minimum_reliable_index_size - we cannot use it as reliable gauge for the best_ratio
       -- so keep old best_ratio value instead as best guess
       when (excluded.indexsize < pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
         then i.best_ratio
@@ -754,7 +754,7 @@ begin
 
   -- tell about not valid indexes
   for index_info in
-    select indexrelname, relname, schemaname, datname from index_pilot.index_current_state
+    select indexrelname, relname, schemaname, datname from index_pilot.index_latest_state
       where not indisvalid
       and datname=_datname
       and (_schemaname is null or schemaname=_schemaname)
@@ -784,8 +784,8 @@ begin
       and reindex_history.relname=age_limit.relname
       and reindex_history.indexrelname=age_limit.indexrelname
       and reindex_history.entry_timestamp<age_limit.max_age;
-    -- clean index_current_state for not existing databases
-  delete from index_pilot.index_current_state where datid not in (
+    -- clean index_latest_state for not existing databases
+  delete from index_pilot.index_latest_state where datid not in (
     select oid from pg_database
     where
       not datistemplate
@@ -823,7 +823,7 @@ begin
     i.indexrelname, 
     i.indexsize,
     (i.indexsize::real/(i.best_ratio*estimated_tuples::real)) as estimated_bloat
-  from index_pilot.index_current_state as i
+  from index_pilot.index_latest_state as i
   where i.datid = _datid
   -- and indisvalid is true
   -- NULLS FIRST because indexes listed with null in estimated bloat going to be reindexed on next cron run
@@ -991,14 +991,13 @@ begin
       );
 
       -- Log the reindex start with in_progress status
-      -- Use cached data from index_current_state instead of remote call
+      -- Use cached data from index_latest_state instead of remote call
       insert into index_pilot.reindex_history (
-        database_name, datname, schemaname, relname, indexrelname,
+        datname, schemaname, relname, indexrelname,
         indexsize_before, indexsize_after, estimated_tuples, 
         reindex_duration, analyze_duration, entry_timestamp, status
       ) 
       select 
-        database_name, 
         datname, 
         schemaname, 
         relname, 
@@ -1010,12 +1009,17 @@ begin
         null, 
         now(), 
         'in_progress'
-      from index_pilot.index_current_state
-      where datname = _index.datname
-        and schemaname = _index.schemaname
-        and relname = _index.relname
-        and indexrelname = _index.indexrelname
-        and indisvalid;
+      from (
+        select distinct on (datid, indexrelid)
+          datname, schemaname, relname, indexrelname, indexsize, estimated_tuples
+        from index_pilot.index_latest_state
+        where datname = _index.datname
+          and schemaname = _index.schemaname
+          and relname = _index.relname
+          and indexrelname = _index.indexrelname
+          and indisvalid
+        order by datid, indexrelid, mtime desc
+      ) latest;
       
       -- commit to release all locks before starting synchronous reindex
       commit;
@@ -1252,20 +1256,9 @@ begin
     raise exception 'Control database architecture required. Cannot run periodic in standalone mode.';
   end if;
 
-  -- Update best_ratio for successfully completed reindexes
-  -- All reindexes are synchronous so this updates recent completions
-  update index_pilot.index_current_state as ics
-  set best_ratio = rh.indexsize_after::real / greatest(1, rh.estimated_tuples)::real
-  from index_pilot.reindex_history rh
-  where ics.datname = rh.datname
-    and ics.schemaname = rh.schemaname
-    and ics.relname = rh.relname
-    and ics.indexrelname = rh.indexrelname
-    and rh.entry_timestamp > now() - interval '1 hour'
-    and rh.indexsize_after > pg_size_bytes(
-      index_pilot.get_setting(rh.datname, rh.schemaname, rh.relname, rh.indexrelname, 'minimum_reliable_index_size')
-    )
-    and (ics.best_ratio is null or rh.indexsize_after::real / greatest(1, rh.estimated_tuples)::real < ics.best_ratio);
+  -- Note: best_ratio updates are now handled during snapshot insertion
+  -- Historical snapshots preserve the best_ratio calculation at the time of observation
+  -- No need to update old snapshots - new snapshots will have updated best_ratio values
 
   perform pg_advisory_unlock(_id);
 end;

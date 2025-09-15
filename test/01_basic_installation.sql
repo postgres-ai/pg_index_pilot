@@ -35,7 +35,7 @@ declare
   _table_count integer;
   _expected_tables text[] := ARRAY[
     'config',
-    'index_current_state', 
+    'index_latest_state', 
     'reindex_history',
     'current_processed_index',
     'tables_version'
