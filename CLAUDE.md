@@ -56,6 +56,7 @@ Please honor the rules defined in `.cursor/rules/` directory when working on thi
 ### Files
 - `index_pilot_tables.sql` - Schema and table definitions
 - `index_pilot_functions.sql` - Core PL/pgSQL functions
+- `index_pilot_fdw.sql` - FDW and connection management functions
 - `test/` - Comprehensive test suite
 - `.gitlab-ci.yml` - CI/CD pipeline configuration
 

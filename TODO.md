@@ -3,7 +3,7 @@
 ## High Priority - Security & Stability
 
 ### Security Fixes
-- [ ] Remove hardcoded default password in `setup_01_user.psql:28`
+- [x] Remove hardcoded default password in `setup_01_user.psql:28` - FIXED: Now requires secure password via psql variable
 - [ ] Review and restrict table ownership transfers in `setup_01_user.psql:68-69`
 - [ ] Audit all SQL string concatenations for injection risks
 - [ ] Implement secure password generation/management system

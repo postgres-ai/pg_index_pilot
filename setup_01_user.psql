@@ -23,9 +23,19 @@ begin
   end if;
 end $$;
 
--- Set a random password for the index_pilot user
--- In production, you should set a secure password
-alter role index_pilot password 'changeme_secure_password_here';
+-- Set a secure password for the index_pilot user
+-- Password should be provided via psql variable: -v index_pilot_password="your_secure_password"
+-- Example: psql -f setup_01_user.psql -v index_pilot_password="$(openssl rand -base64 32)"
+do $$
+begin
+  if current_setting('index_pilot.password', true) is null then
+    raise exception 'Password must be provided via psql variable. Usage: psql -f setup_01_user.psql -v index_pilot_password="your_secure_password"'
+      using hint = 'Generate secure password: openssl rand -base64 32';
+  end if;
+  
+  execute format('alter role index_pilot password %L', current_setting('index_pilot.password'));
+  raise notice 'Password set for index_pilot user';
+end $$;
 
 -- Grant necessary permissions for index_pilot user
 -- Database-level permissions
@@ -124,8 +134,7 @@ begin
   raise notice '=== index_pilot User Setup Complete ===';
   raise notice '';
   raise notice 'Next steps:';
-  raise notice '1. Update the password for index_pilot user:';
-  raise notice '   ALTER ROLE index_pilot PASSWORD ''your_secure_password'';';
+  raise notice '1. Password has been set securely via psql variable';
   raise notice '';
   raise notice '2. Connect as index_pilot user and install pg_index_pilot:';
   raise notice '   psql -U index_pilot -d % -f setup_02_tooling.psql', current_database();

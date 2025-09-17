@@ -297,6 +297,7 @@ git pull
 
 # Reload functions in control DB
 psql -h <control_host> -U <admin_user> -d <index_pilot_control_db> -f index_pilot_functions.sql
+psql -h <control_host> -U <admin_user> -d <index_pilot_control_db> -f index_pilot_fdw.sql
 ```
 
 ### Post-checks and resume
