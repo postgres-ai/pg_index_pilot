@@ -174,7 +174,7 @@ test:pg17:
       ./install.sh verify -H postgres -P 5432 -U postgres -W "$PGPASSWORD" -C "$CONTROL_DB" | tee /tmp/verify.txt
     - |
       echo "Asserting target is registered in control DB"
-      grep -q "registered targets|t|1" /tmp/verify.txt
+      grep -q "registered targets|t|postgres" /tmp/verify.txt
   tags:
     - docker
   allow_failure: false
@@ -252,6 +252,7 @@ test:nonsuperuser:
       echo "Installing as non-superuser..."
       PGPASSWORD=testpass psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_tables.sql
       PGPASSWORD=testpass psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_functions.sql
+      PGPASSWORD=testpass psql -h postgres -U index_pilot -d test_index_pilot -f index_pilot_fdw.sql
     - |
       echo "Setting up FDW for non-superuser..."
       # Get the actual IP for FDW connection

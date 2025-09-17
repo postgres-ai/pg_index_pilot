@@ -143,6 +143,9 @@ create table index_pilot.reindex_history (
 
 create index reindex_history_oid_index on index_pilot.reindex_history(datid, indexrelid);
 create index reindex_history_index on index_pilot.reindex_history(datname, schemaname, relname, indexrelname);
+create index reindex_history_datname_index on index_pilot.reindex_history(datname);
+create index reindex_history_timestamp_index on index_pilot.reindex_history(entry_timestamp);
+create index reindex_history_status_index on index_pilot.reindex_history(status);
 
 
 /*
@@ -165,6 +168,9 @@ create table index_pilot.index_latest_state (
 
 create unique index index_latest_state_oid_index on index_pilot.index_latest_state(datid, indexrelid);
 create index index_latest_state_index on index_pilot.index_latest_state(datname, schemaname, relname, indexrelname);
+create index index_latest_state_datname_index on index_pilot.index_latest_state(datname);
+create index index_latest_state_datid_index on index_pilot.index_latest_state(datid);
+create index index_latest_state_indisvalid_index on index_pilot.index_latest_state(indisvalid);
 
 
 /*

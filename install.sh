@@ -235,21 +235,9 @@ install_control() {
   print_info "Installing schema and functions into ${CONTROL_DB}"
   psql_file "${CONTROL_DB}" "${SCRIPT_DIR}/index_pilot_tables.sql"
   psql_file "${CONTROL_DB}" "${SCRIPT_DIR}/index_pilot_functions.sql"
+  psql_file "${CONTROL_DB}" "${SCRIPT_DIR}/index_pilot_fdw.sql"
 
-  # Setup FDW and user mapping strictly as in README via setup_connection()
-  # Configure FDW (ensure server and mappings), then call setup_connection (README) to validate
-  print_info "Configuring FDW: self server and user mappings"
-  psql_cmd "${CONTROL_DB}" "select index_pilot.setup_fdw_self_connection('${DB_HOST}', ${DB_PORT}, null);"
-  psql_cmd "${CONTROL_DB}" "select index_pilot.setup_user_mapping('${DB_USER}', '${DB_PASS}');"
-  psql_cmd "${CONTROL_DB}" "do \$\$ begin
-    if exists (select 1 from pg_roles where rolname = 'rds_superuser') then
-      begin
-        execute 'create user mapping if not exists for rds_superuser server index_pilot_self options (user ''${DB_USER}'', password ''${DB_PASS}'')';
-      exception when others then
-        perform 1;
-      end;
-    end if;
-  end \$\$;"
+  # Configure FDW strictly via setup_connection() (sets up self server + mappings and validates)
   print_info "Validating FDW via setup_connection()"
   psql_cmd "${CONTROL_DB}" "select index_pilot.setup_connection('${DB_HOST}', ${DB_PORT}, '${DB_USER}', '${DB_PASS}');"
   # Validate self FDW connection explicitly
@@ -355,7 +343,7 @@ register_target() {
   fi
 
   print_info "Testing secure FDW connection via internal helper"
-  if psql_cmd "${CONTROL_DB}" "select index_pilot._connect_securely('${TARGET_DB}');" > /dev/null 2>&1; then
+  if psql_cmd "${CONTROL_DB}" "select index_pilot._connect_securely('${TARGET_DB}'::name);" > /dev/null 2>&1; then
     print_ok "FDW connection OK for target database '${TARGET_DB}'"
   else
     print_err "FDW connection test failed. Verify user mapping and network access."

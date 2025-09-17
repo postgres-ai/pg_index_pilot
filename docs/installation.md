@@ -70,6 +70,7 @@ psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_contro
 # 3. Install schema and functions in control database
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_tables.sql
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_functions.sql
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_fdw.sql
 
 # 4. Setup FDW connection infrastructure (self-connection in control DB)
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control \
@@ -116,6 +117,7 @@ psql -U postgres -d index_pilot_control -c "CREATE EXTENSION IF NOT EXISTS dblin
 # 3. Install schema and functions in control database (as superuser)
 psql -U postgres -d index_pilot_control -f index_pilot_tables.sql
 psql -U postgres -d index_pilot_control -f index_pilot_functions.sql
+psql -U postgres -d index_pilot_control -f index_pilot_fdw.sql
 
 # 4. Setup FDW connection infrastructure (as superuser; self-connection in control DB)
 psql -U postgres -d index_pilot_control \

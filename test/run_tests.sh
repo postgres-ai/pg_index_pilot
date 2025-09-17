@@ -153,6 +153,9 @@ if [[ "${SKIP_INSTALL}" != "true" ]]; then
       exit 1
     fi
     if ! run_sql "index_pilot_functions.sql" "Functions installation" "${CONTROL_DB}"; then
+      exit 1
+    fi
+    if ! run_sql "index_pilot_fdw.sql" "FDW functions installation" "${CONTROL_DB}"; then
       echo -e "${RED}Error: Functions installation failed${NC}" >&2
       exit 1
     fi
@@ -162,6 +165,9 @@ if [[ "${SKIP_INSTALL}" != "true" ]]; then
       exit 1
     fi
     if ! run_sql "../index_pilot_functions.sql" "Functions installation" "${CONTROL_DB}"; then
+      exit 1
+    fi
+    if ! run_sql "../index_pilot_fdw.sql" "FDW functions installation" "${CONTROL_DB}"; then
       echo -e "${RED}Error: Functions installation failed${NC}" >&2
       exit 1
     fi
@@ -254,7 +260,7 @@ if [[ "${SKIP_INSTALL}" != "true" ]]; then
 
   # Try to test the connection from control to target database
   if psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -X -d "${CONTROL_DB}" -c "
-        SELECT index_pilot._connect_securely('${TARGET_DB}');
+        SELECT index_pilot._connect_securely('${TARGET_DB}'::name);
     " 2> /dev/null; then
     FDW_TEST_SUCCESS=true
     echo -e "${GREEN}✓ FDW connection test successful${NC}"
@@ -298,7 +304,7 @@ if [[ "${SKIP_INSTALL}" != "true" ]]; then
 
         # Test again with IP
         if psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -X -d "${CONTROL_DB}" -c "
-                    SELECT index_pilot._connect_securely('${TARGET_DB}');
+                    SELECT index_pilot._connect_securely('${TARGET_DB}'::name);
                 " 2> /dev/null; then
           FDW_TEST_SUCCESS=true
           echo -e "${GREEN}✓ FDW connection test successful with IP: ${POSTGRES_IP}${NC}"
@@ -319,7 +325,7 @@ if [[ "${SKIP_INSTALL}" != "true" ]]; then
 
     echo "Attempting direct connection test:"
     psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -X -d "${CONTROL_DB}" -c "
-            SELECT index_pilot._connect_securely('${TARGET_DB}');
+            SELECT index_pilot._connect_securely('${TARGET_DB}'::name);
         " 2>&1 || true
 
     exit 1

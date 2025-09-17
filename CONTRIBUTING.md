@@ -34,6 +34,7 @@ psql -h <host> -U <admin_user> -d index_pilot_control -c "create extension if no
 # 3) Load schema and functions
 psql -h <host> -U <admin_user> -d index_pilot_control -f index_pilot_tables.sql
 psql -h <host> -U <admin_user> -d index_pilot_control -f index_pilot_functions.sql
+psql -h <host> -U <admin_user> -d index_pilot_control -f index_pilot_fdw.sql
 
 # Note: at this step you may see a WARNING from the internal permissions self-check.
 # It is expected before FDW self-connection is configured.

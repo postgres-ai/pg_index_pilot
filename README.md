@@ -158,6 +158,22 @@ Notes:
 - `target_<db>`: FDW server that points to the target database. This name goes to `index_pilot.target_databases.fdw_server_name`.
 - User mapping must exist for `current_user` (in control DB) to both servers it uses: self and each target server.
 
+### Security Note
+
+**CRITICAL**: Never use hardcoded passwords in production. The `setup_01_user.psql` script requires a secure password to be provided via psql variable:
+
+```bash
+# Generate secure random password
+RANDOM_PWD=$(openssl rand -base64 32)
+
+# Use the secure setup script (recommended)
+./setup_user_secure.sh
+
+# Or run manually with secure password
+psql -f setup_01_user.psql -v index_pilot_password="$RANDOM_PWD"
+echo "Generated password: $RANDOM_PWD"
+```
+
 ### Manual installation
 
 #### Control database setup (Required)
@@ -177,6 +193,7 @@ psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_contro
 # 3. Install schema and functions in control database
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_tables.sql
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_functions.sql
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_fdw.sql
 
 # 4. Setup FDW connection infrastructure (self-connection in control DB)
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control \
@@ -222,6 +239,7 @@ psql -U postgres -d index_pilot_control -c "CREATE EXTENSION IF NOT EXISTS dblin
 # 3. Install schema and functions in control database (as superuser)
 psql -U postgres -d index_pilot_control -f index_pilot_tables.sql
 psql -U postgres -d index_pilot_control -f index_pilot_functions.sql
+psql -U postgres -d index_pilot_control -f index_pilot_fdw.sql
 
 # 4. Setup FDW connection infrastructure (as superuser; self-connection in control DB)
 psql -U postgres -d index_pilot_control \
@@ -397,6 +415,7 @@ git pull
 
 # Reload the updated functions (or reinstall completely)
 psql -1 -d your_database -f index_pilot_functions.sql
+psql -1 -d your_database -f index_pilot_fdw.sql
 ```
 
 ## Monitoring and Analysis
