@@ -235,9 +235,7 @@ install_control() {
   print_info "Installing schema and functions into ${CONTROL_DB}"
   psql_file "${CONTROL_DB}" "${SCRIPT_DIR}/index_pilot_tables.sql"
   psql_file "${CONTROL_DB}" "${SCRIPT_DIR}/index_pilot_functions.sql"
-  psql_file "${CONTROL_DB}" "${SCRIPT_DIR}/index_pilot_fdw.sql"
-  
-  # No self-connection bootstrap; FDW will be validated per target in register-target
+  psql_file "${CONTROL_DB}" "${SCRIPT_DIR}/index_pilot_fdw.sql" 
 
   print_info "Verifying installation"
   psql_cmd "${CONTROL_DB}" "select 'Version: '||index_pilot.version();"
