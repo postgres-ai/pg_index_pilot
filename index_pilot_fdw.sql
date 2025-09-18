@@ -121,8 +121,10 @@ begin
   -- Check target servers registered
   return query select 
     'Target servers registered'::text,
-    case when exists (select 1 from index_pilot.target_databases) 
-      then 'YES' else 'NO' end::text,
+    case
+      when exists (select from index_pilot.target_databases) then 'YES'
+      else 'NO'
+    end::text
     'Register targets: (SQL) create server + user mapping + insert into index_pilot.target_databases; or use install.sh register-target'::text;
 
   -- Check user mapping for current user on at least one target server
@@ -131,11 +133,18 @@ begin
     case when exists (
       select 1
       from pg_user_mappings um
-      where um.usename = current_user
+      where
+        um.usename = current_user
         and um.srvname in (
-          select fdw_server_name from index_pilot.target_databases where enabled
+          select fdw_server_name
+          from index_pilot.target_databases
+          where enabled
         )
-    ) then 'exists' else 'MISSING' end::text,
+    ) then
+      'exists'
+    else
+      'MISSING'
+    end::text,
     'Create mapping: create user mapping for current_user server <server> options (user ''<remote_user>'', password ''<password>'');'::text;
 
   -- Overall security status
@@ -147,7 +156,8 @@ begin
       exists (select 1 from index_pilot.target_databases) and
       exists (
         select 1 from pg_user_mappings um
-        where um.usename = current_user
+        where
+          um.usename = current_user
           and um.srvname in (select fdw_server_name from index_pilot.target_databases where enabled)
       )
     ) then 'SECURE' else 'SETUP_REQUIRED' end::text,
@@ -157,7 +167,8 @@ begin
       exists (select 1 from index_pilot.target_databases) and
       exists (
         select 1 from pg_user_mappings um
-        where um.usename = current_user
+        where
+          um.usename = current_user
           and um.srvname in (select fdw_server_name from index_pilot.target_databases where enabled)
       )
     ) then 'All FDW components are properly configured'

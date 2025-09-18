@@ -93,11 +93,15 @@ psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_contro
 insert into index_pilot.target_databases(database_name, host, port, fdw_server_name, enabled)
 values ('your_database', 'your-instance.region.rds.amazonaws.com', 5432, 'target_your_database', true)
 on conflict (database_name) do update
-  set host=excluded.host, port=excluded.port, fdw_server_name=excluded.fdw_server_name, enabled=true;
+  set
+    host = excluded.host,
+    port = excluded.port,
+    fdw_server_name = excluded.fdw_server_name,
+    enabled = true;
 SQL
 
 # 6. Verify FDW and environment
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_security_status();"
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_security_status()"
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "select * from index_pilot.check_environment();"
 ```
 
@@ -142,7 +146,7 @@ on conflict (database_name) do update
 SQL
 
 # 7. Verify
-psql -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_security_status();"
+psql -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_security_status()"
 psql -U postgres -d index_pilot_control -c "select * from index_pilot.check_environment();"
 ```
 ### Verification checklist
