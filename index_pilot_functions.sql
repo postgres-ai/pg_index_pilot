@@ -1433,16 +1433,15 @@ begin
     exists (select from pg_extension where extname = 'postgres_fdw');
 
   return query select 
-    'Has index_pilot_self server'::text,
-    exists (select from pg_foreign_server where srvname = 'index_pilot_self');
+    'Has target servers registered'::text,
+    exists (select 1 from index_pilot.target_databases);
 
   return query select 
     'Has user mapping for dblink'::text,
     exists (
-      select from pg_user_mappings 
-      where
-        srvname = 'index_pilot_self' 
-        and usename = current_user
+      select 1 from pg_user_mappings as um
+      where um.usename = current_user
+        and um.srvname in (select fdw_server_name from index_pilot.target_databases where enabled)
     );
 
   -- Verify reindex capability by checking ownership of at least one index
