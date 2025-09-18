@@ -142,13 +142,6 @@ function index_pilot.check_fdw_security_status()
 returns table(component text, status text, details text)
 ```
 
-#### `index_pilot.check_fdw_status()`
-Checks FDW components presence.
-```sql
-function index_pilot.check_fdw_status()
-returns table(component text, status text, details text)
-```
-
 ### Maintenance helpers and meta
 
 #### `index_pilot.do_force_populate_index_stats()`
