@@ -153,10 +153,9 @@ Notes:
 - CONTROL_USER/PASS (user running commands in control DB)
 - TARGET_USER/PASS (user in the target DB; typically an owner or a role with owner rights)
 
-### Key concepts (1 minute)
-- `index_pilot_self`: FDW server for self-connection inside control DB (created by `setup_connection()`).
+### Key concepts
 - `target_<db>`: FDW server that points to the target database. This name goes to `index_pilot.target_databases.fdw_server_name`.
-- User mapping must exist for `current_user` (in control DB) to both servers it uses: self and each target server.
+- A user mapping must exist for `current_user` (in the control DB) to each `target_<db>` server you intend to use.
 
 ### Security Note
 
@@ -195,21 +194,22 @@ psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_contro
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_functions.sql
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_fdw.sql
 
-# 4. Setup FDW connection infrastructure (self-connection in control DB)
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control \
-  -c "select index_pilot.setup_connection('your-instance.region.rds.amazonaws.com', 5432, 'postgres', 'your_password');"
-
-# 5. Create FDW server and user mapping for the TARGET database (not index_pilot_self)
+# 4. Create FDW server and user mapping for the TARGET database
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control <<'SQL'
-create server if not exists target_your_database foreign data wrapper postgres_fdw
+create server if not exists target_<your_database> foreign data wrapper postgres_fdw
   options (host 'your-instance.region.rds.amazonaws.com', port '5432', dbname 'your_database');
 
 -- dblink_connect_u uses current_user mapping; create mapping for the user running control DB (often postgres or index_pilot)
-create user mapping if not exists for current_user server target_your_database
+create user mapping if not exists for current_user server target_<your_database>
   options (user 'remote_owner_or_role', password 'remote_password');
+
+-- RDS/Aurora only: create mapping for rds_superuser if the role exists
+drop user mapping if exists for rds_superuser server target_your_database;
+create user mapping for rds_superuser server target_your_database
+  options (user 'remote_owner_or_role', password 'remote_password');  
 SQL
 
-# 6. Register the TARGET database (links index_pilot.target_databases to your FDW server)
+# 5. Register the TARGET database (links index_pilot.target_databases to your FDW server)
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control <<'SQL'
 insert into index_pilot.target_databases(database_name, host, port, fdw_server_name, enabled)
 values ('your_database', 'your-instance.region.rds.amazonaws.com', 5432, 'target_your_database', true)
@@ -218,7 +218,7 @@ on conflict (database_name) do update
 SQL
 
 # 7. Verify FDW and environment
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_status();"
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_security_status();"
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "select * from index_pilot.check_environment();"
 ```
 
@@ -241,11 +241,7 @@ psql -U postgres -d index_pilot_control -f index_pilot_tables.sql
 psql -U postgres -d index_pilot_control -f index_pilot_functions.sql
 psql -U postgres -d index_pilot_control -f index_pilot_fdw.sql
 
-# 4. Setup FDW connection infrastructure (as superuser; self-connection in control DB)
-psql -U postgres -d index_pilot_control \
-  -c "select index_pilot.setup_connection('127.0.0.1', 5432, 'postgres', 'postgres');"  # Use actual password
-
-# 5. Create FDW server and user mapping for the TARGET database
+# 4. Create FDW server and user mapping for the TARGET database
 psql -U postgres -d index_pilot_control <<'SQL'
 create server if not exists target_your_database foreign data wrapper postgres_fdw
   options (host '127.0.0.1', port '5432', dbname 'your_database');
@@ -254,7 +250,7 @@ create user mapping if not exists for current_user server target_your_database
   options (user 'remote_owner_or_role', password 'remote_password');
 SQL
 
-# 6. Register the TARGET database
+# 5. Register the TARGET database
 psql -U postgres -d index_pilot_control <<'SQL'
 insert into index_pilot.target_databases(database_name, host, port, fdw_server_name, enabled)
 values ('your_database', '127.0.0.1', 5432, 'target_your_database', true)
@@ -263,7 +259,7 @@ on conflict (database_name) do update
 SQL
 
 # 7. Verify
-psql -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_status();"
+psql -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_security_status();"
 psql -U postgres -d index_pilot_control -c "select * from index_pilot.check_environment();"
 ```
 

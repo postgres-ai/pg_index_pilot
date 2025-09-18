@@ -237,12 +237,6 @@ install_control() {
   psql_file "${CONTROL_DB}" "${SCRIPT_DIR}/index_pilot_functions.sql"
   psql_file "${CONTROL_DB}" "${SCRIPT_DIR}/index_pilot_fdw.sql"
 
-  # Configure FDW strictly via setup_connection() (sets up self server + mappings and validates)
-  print_info "Validating FDW via setup_connection()"
-  psql_cmd "${CONTROL_DB}" "select index_pilot.setup_connection('${DB_HOST}', ${DB_PORT}, '${DB_USER}', '${DB_PASS}');"
-  # Validate self FDW connection explicitly
-  psql_cmd "${CONTROL_DB}" "select dblink_connect_u('ip_self_test','index_pilot_self'); select dblink_disconnect('ip_self_test');"
-
   print_info "Verifying installation"
   psql_cmd "${CONTROL_DB}" "select 'Version: '||index_pilot.version();"
   psql_cmd "${CONTROL_DB}" "select * from index_pilot.check_fdw_security_status();" | sed 's/^/  /'

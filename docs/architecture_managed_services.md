@@ -109,14 +109,14 @@ The system has been thoroughly tested on managed PostgreSQL services with the fo
 The system uses **secure postgres_fdw USER MAPPING** for password management:
 
 **How it works:**
-1. **Password provided ONCE** during setup:
+1. **Password provided ONCE** during setup (via user mapping to the target server):
    ```sql
-   select index_pilot.setup_connection(
-       'your-instance.region.rds.amazonaws.com',
-       5432,
-       'index_pilot',
-       'your_secure_password'  -- Password provided only here
-   );
+   -- Create user mapping for the control DB current_user to a target server
+   create user mapping if not exists for current_user server target_your_database
+     options (user 'index_pilot', password 'your_secure_password');
+   -- RDS/Aurora: optionally create mapping for rds_superuser
+   create user mapping for rds_superuser server target_your_database
+     options (user 'index_pilot', password 'your_secure_password');
    ```
 
 2. **Password stored securely** in PostgreSQL catalog via user mapping
@@ -151,10 +151,8 @@ grant usage on foreign data wrapper postgres_fdw to index_pilot;
 -- May need additional grants by admin user
 grant execute on function dblink_connect_u(text,text) to index_pilot;
 
--- Create USER MAPPING for admin users (required for managed services compatibility)
-create user mapping if not exists for postgres server index_pilot_self 
-  options (user 'index_pilot', password 'your_secure_password');
-create user mapping if not exists for rds_superuser server index_pilot_self 
+-- Create USER MAPPING for admin users (compatibility on managed services)
+create user mapping for rds_superuser server target_your_database 
   options (user 'index_pilot', password 'your_secure_password');
 ```
 

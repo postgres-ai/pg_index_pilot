@@ -72,11 +72,7 @@ psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_contro
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_functions.sql
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -f index_pilot_fdw.sql
 
-# 4. Setup FDW connection infrastructure (self-connection in control DB)
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control \
-  -c "select index_pilot.setup_connection('your-instance.region.rds.amazonaws.com', 5432, 'postgres', 'your_password');"
-
-# 5. Create FDW server and user mapping for the TARGET database (not index_pilot_self)
+# 4. Create FDW server and user mapping for the TARGET database
 #    fdw_server_name must refer to a foreign server that points to the TARGET DB
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control <<'SQL'
 create server if not exists target_your_database foreign data wrapper postgres_fdw
@@ -85,18 +81,27 @@ create server if not exists target_your_database foreign data wrapper postgres_f
 -- dblink_connect_u uses current_user mapping; create mapping for the user running control DB (often postgres or index_pilot)
 create user mapping if not exists for current_user server target_your_database
   options (user 'remote_owner_or_role', password 'remote_password');
+
+-- RDS/Aurora only: create mapping for rds_superuser if the role exists
+drop user mapping if exists for rds_superuser server target_your_database;
+create user mapping for rds_superuser server target_your_database
+  options (user 'remote_owner_or_role', password 'remote_password');
 SQL
 
-# 6. Register the TARGET database (links index_pilot.target_databases to your FDW server)
+# 5. Register the TARGET database (links index_pilot.target_databases to your FDW server)
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control <<'SQL'
 insert into index_pilot.target_databases(database_name, host, port, fdw_server_name, enabled)
 values ('your_database', 'your-instance.region.rds.amazonaws.com', 5432, 'target_your_database', true)
 on conflict (database_name) do update
-  set host=excluded.host, port=excluded.port, fdw_server_name=excluded.fdw_server_name, enabled=true;
+  set
+    host = excluded.host,
+    port = excluded.port,
+    fdw_server_name = excluded.fdw_server_name,
+    enabled = true;
 SQL
 
-# 7. Verify FDW and environment
-psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_status();"
+# 6. Verify FDW and environment
+psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_security_status()"
 psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_control -c "select * from index_pilot.check_environment();"
 ```
 
@@ -141,7 +146,7 @@ on conflict (database_name) do update
 SQL
 
 # 7. Verify
-psql -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_status();"
+psql -U postgres -d index_pilot_control -c "select * from index_pilot.check_fdw_security_status()"
 psql -U postgres -d index_pilot_control -c "select * from index_pilot.check_environment();"
 ```
 ### Verification checklist
@@ -150,7 +155,7 @@ Run in CONTROL_DB after installation/registration:
 
 ```sql
 -- FDW basic status
-select * from index_pilot.check_fdw_status();
+select * from index_pilot.check_fdw_security_status();
 
 -- Environment and targets
 select * from index_pilot.check_environment();
