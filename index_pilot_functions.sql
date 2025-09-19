@@ -748,6 +748,20 @@ begin
   -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
   when (_force_populate and indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size'))) then 
     indexsize::real / estimated_tuples::real
+  -- if not force-populating, try to backfill baseline from recent reindex history for the same logical index
+  when (indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size'))) then
+    (
+      select (rh.indexsize_after::real / greatest(1, rh.estimated_tuples))
+      from index_pilot.reindex_history as rh
+      where
+        rh.datname = datname
+        and rh.schemaname = schemaname
+        and rh.relname = relname
+        and rh.indexrelname = indexrelname
+        and rh.status = 'completed'
+      order by rh.entry_timestamp desc
+      limit 1
+    )
   -- best_ratio estimation are null for the new index entries because we don't have any bloat information for it (default behavior)
   else
       null
@@ -773,9 +787,24 @@ begin
       -- so keep old best_ratio value instead as best guess
       when (excluded.indexsize < pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
         then i.best_ratio
-      -- do not overrrid null best ratio (we don't have any reliable ratio info at this stage)
-      when (i.best_ratio is null)
-        then null
+      -- if current best_ratio is null, try to backfill from recent reindex history for the same logical index
+      when (i.best_ratio is null) then
+        case
+          when (excluded.indexsize > pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
+          then (
+            select (rh.indexsize_after::real / greatest(1, rh.estimated_tuples))
+            from index_pilot.reindex_history as rh
+            where
+              rh.datname = excluded.datname
+              and rh.schemaname = excluded.schemaname
+              and rh.relname = excluded.relname
+              and rh.indexrelname = excluded.indexrelname
+              and rh.status = 'completed'
+            order by rh.entry_timestamp desc
+            limit 1
+          )
+          else null
+        end
       -- set best_value as least from current value and new one
       else
   least(i.best_ratio, excluded.indexsize::real / excluded.estimated_tuples::real)
