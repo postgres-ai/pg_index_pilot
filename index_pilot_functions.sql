@@ -1343,7 +1343,7 @@ language plpgsql;
  * Main periodic execution procedure for automated index maintenance
  * Primary entry point for scheduled operations: validates, migrates, processes databases
  */
-create procedure index_pilot.periodic(
+create or replace procedure index_pilot.periodic(
   real_run boolean default false,
   force boolean default false
 ) as
@@ -1385,6 +1385,8 @@ begin
           
       if real_run then
         call index_pilot.do_reindex(_datname, null, null, null, force);
+        -- refresh snapshot right after reindex to clamp baseline with current ratio
+        perform index_pilot._record_indexes_info(_datname, null, null, null);
       end if;
     end loop;
         
