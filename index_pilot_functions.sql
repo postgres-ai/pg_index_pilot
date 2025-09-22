@@ -779,7 +779,7 @@ begin
       when (i.best_ratio is null)
         then excluded.indexsize::real / excluded.estimated_tuples::real
       -- otherwise keep baseline unchanged (non-increasing, unaffected by reltuples drift)
-      else i.best_ratio
+      else least(i.best_ratio, excluded.indexsize::real / excluded.estimated_tuples::real)
       end;
 
   -- tell about not valid indexes
