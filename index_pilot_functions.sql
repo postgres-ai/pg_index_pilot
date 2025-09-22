@@ -744,18 +744,16 @@ begin
     indexsize,
     indisvalid, 
     estimated_tuples,
-  case
-  -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
-  when (_force_populate and indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size'))) then 
-    indexsize::real / estimated_tuples::real
-  when (indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size'))) then
-    -- set baseline from current ratio on first sighting (e.g., after reindex/oid change)
-    indexsize::real / estimated_tuples::real
-  else
-    -- too small for reliable baseline
-    null
-  end
-  as best_ratio
+    case
+      when (indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size'))) then
+        -- initialize baseline from the current ratio on first sighting (insert),
+        -- including after REINDEX/OID change; _force_populate is not needed on insert
+        indexsize::real / estimated_tuples::real
+      else
+        -- too small for reliable baseline
+          null
+      end
+    as best_ratio
   from _actual_indexes
   on conflict (datid, indexrelid)
   do update set
