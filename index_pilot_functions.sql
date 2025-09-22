@@ -767,17 +767,17 @@ begin
     estimated_tuples = excluded.estimated_tuples,
     best_ratio =
       case
-      -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
-      when (_force_populate and excluded.indexsize > pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
-        then excluded.indexsize::real / excluded.estimated_tuples::real
-      -- if index is too small, keep previous
-      when (excluded.indexsize < pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
-        then i.best_ratio
-      -- fill only if missing
-      when (i.best_ratio is null)
-        then excluded.indexsize::real / excluded.estimated_tuples::real
-      -- otherwise keep baseline unchanged (non-increasing, unaffected by reltuples drift)
-      else least(i.best_ratio, excluded.indexsize::real / excluded.estimated_tuples::real)
+        -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
+        when (_force_populate and excluded.indexsize > pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
+          then excluded.indexsize::real / excluded.estimated_tuples::real
+        -- if index is too small, keep previous
+        when (excluded.indexsize < pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
+          then i.best_ratio
+        -- fill only if missing
+        when (i.best_ratio is null)
+          then excluded.indexsize::real / excluded.estimated_tuples::real
+        -- otherwise keep baseline unchanged (non-increasing, unaffected by reltuples drift)
+        else least(i.best_ratio, excluded.indexsize::real / excluded.estimated_tuples::real)
       end;
 
   -- tell about not valid indexes
