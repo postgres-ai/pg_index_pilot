@@ -54,7 +54,7 @@ The roadmap covers three big areas:
     4. [x] Tested on managed services
         - [x] RDS and Aurora (see AWS specifics in Installation: docs/installation.md#aws-rds--aurora-specifics)
         - [ ] CloudSQL
-        - [ ] Supabase
+        - [x] Supabase
         - [ ] Crunchy Bridge
         - [ ] Azure
     5. [ ] Integration with postgres_ai monitoring

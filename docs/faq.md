@@ -20,7 +20,7 @@ PGPASSWORD='your_password' ./install.sh verify -H <host> -U <user> -C <control_d
   - `-q/--quiet`: Quieter `psql` output
 
 - **Managed services specifics (RDS/Aurora, etc.)?**
-  - Installer creates a user mapping for `rds_superuser` when the role exists.
+  - Installer creates user mappings for the current user on the FDW server.
   - Use `--fdw-host` reachable from the DB server/container network.
 
 - **How do I uninstall?**
