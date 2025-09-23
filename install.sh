@@ -318,11 +318,11 @@ register_target() {
     values ('${TARGET_DB}', '${fdw_host}', ${DB_PORT}, '${server}', true)
     on conflict (database_name) do update set host=excluded.host, port=excluded.port, fdw_server_name=excluded.fdw_server_name, enabled=true;"
 
-  # User mapping for current user (use provided password)
+  # User mapping for current_user (managed-services friendly)
   if [[ -n "${DB_PASS}" ]]; then
-    print_info "Ensuring user mapping for ${DB_USER} on server ${server}"
-    psql_cmd "${CONTROL_DB}" "drop user mapping if exists for \"${DB_USER}\" server ${server};" || true
-    psql_cmd "${CONTROL_DB}" "create user mapping for \"${DB_USER}\" server ${server} options (user '${DB_USER}', password '${DB_PASS}');" || true
+    print_info "Ensuring user mapping for current_user on server ${server}"
+    psql_cmd "${CONTROL_DB}" "drop user mapping if exists for current_user server ${server};" || true
+    psql_cmd "${CONTROL_DB}" "create user mapping for current_user server ${server} options (user '${DB_USER}', password '${DB_PASS}');" || true
   else
     print_info "Skipping user mapping password setup (PGPASSWORD not set)"
   fi
