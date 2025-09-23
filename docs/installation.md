@@ -124,7 +124,7 @@ psql -U postgres -d index_pilot_control -f index_pilot_fdw.sql
 psql -U postgres -d index_pilot_control \
   -c "select index_pilot.setup_connection('127.0.0.1', 5432, 'postgres', 'postgres');"  # Use actual password
 
-# 5. Create FDW server and user mapping for the TARGET database (not index_pilot_self)
+# 5. Create FDW server and user mapping for the TARGET database
 psql -U postgres -d index_pilot_control <<'SQL'
 create server if not exists target_your_database foreign data wrapper postgres_fdw
   options (host '127.0.0.1', port '5432', dbname 'your_database');
