@@ -11,7 +11,7 @@ set client_min_messages to warning;
  * Establish secure dblink connection to target database via postgres_fdw
  * Uses FDW user mapping for secure credentials, prevents deadlocks, auto-reconnects
  */
-create function index_pilot._connect_securely(
+create or replace function index_pilot._connect_securely(
   _datname name
 ) returns void as
 $body$
@@ -38,7 +38,8 @@ begin
     _fdw_server_name text;
   begin
     -- Control database architecture is REQUIRED - get the FDW server for the target database
-    select fdw_server_name into _fdw_server_name
+    select fdw_server_name
+    into _fdw_server_name
     from index_pilot.target_databases
     where database_name = _datname
     and enabled = true;
@@ -73,7 +74,7 @@ language plpgsql;
  * Establish secure dblink connection if not already connected
  * Creates secure FDW connection only if needed, handles null connections case
  */
-create function index_pilot._dblink_connect_if_not(
+create or replace function index_pilot._dblink_connect_if_not(
   _datname name
 ) returns void as
 $body$
@@ -94,7 +95,7 @@ language plpgsql;
  * Comprehensive postgres_fdw security setup validation
  * Validates FDW configuration components with detailed status and guidance
  */
-create function index_pilot.check_fdw_security_status() returns table(
+create or replace function index_pilot.check_fdw_security_status() returns table(
   component text,
   status text,
   details text
