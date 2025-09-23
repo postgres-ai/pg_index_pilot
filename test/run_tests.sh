@@ -234,20 +234,6 @@ if [[ "${SKIP_INSTALL}" != "true" ]]; then
     psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -X -d "${CONTROL_DB}" -c "
             CREATE USER MAPPING FOR ${DB_USER} SERVER index_pilot_target OPTIONS (user '${DB_USER}', password '${DB_PASS}');
         " || echo "Warning: Could not setup user mapping"
-
-    # For RDS, also setup mapping for rds_superuser with PROPER credentials
-    # Note: rds_superuser needs to connect as the actual postgres user
-    psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -X -d "${CONTROL_DB}" -c "
-            DO $$
-            BEGIN
-                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rds_superuser') THEN
-                    -- Drop existing mapping if any
-                    DROP USER MAPPING IF EXISTS FOR rds_superuser SERVER index_pilot_target;
-                    -- Create mapping with postgres user credentials
-                    CREATE USER MAPPING FOR rds_superuser SERVER index_pilot_target OPTIONS (user '${DB_USER}', password '${DB_PASS}');
-                END IF;
-            END $$;
-        " 2> /dev/null || true
   else
     psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -X -d "${CONTROL_DB}" -c "
             CREATE USER MAPPING FOR ${DB_USER} SERVER index_pilot_target;
@@ -289,18 +275,7 @@ if [[ "${SKIP_INSTALL}" != "true" ]]; then
                     CREATE USER MAPPING FOR ${DB_USER} SERVER index_pilot_target OPTIONS (user '${DB_USER}', password '${DB_PASS}');
                 " 2> /dev/null
 
-        # Also setup rds_superuser if exists
-        if [[ -n "${DB_PASS}" ]]; then
-          psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -X -d "${CONTROL_DB}" -c "
-                        DO $$
-                        BEGIN
-                            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rds_superuser') THEN
-                                DROP USER MAPPING IF EXISTS FOR rds_superuser SERVER index_pilot_target;
-                                CREATE USER MAPPING FOR rds_superuser SERVER index_pilot_target OPTIONS (user '${DB_USER}', password '${DB_PASS}');
-                            END IF;
-                        END $$;
-                    " 2> /dev/null || true
-        fi
+        # Note: For RDS, ensure current_user has proper user mapping
 
         # Test again with IP
         if psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -X -d "${CONTROL_DB}" -c "
