@@ -135,6 +135,15 @@ test:pg17:
   tags:
     - docker
 
+# Test PostgreSQL 18 RC1
+test:pg18rc1:
+  <<: *test_definition
+  services:
+    - name: postgres:18rc1-alpine
+      alias: postgres
+  tags:
+    - docker
+
 
 .install_sh_template: &install_sh_template
   stage: test
@@ -184,6 +193,13 @@ test:install_sh:pg17:
   image: postgres:17-alpine
   services:
     - name: postgres:17-alpine
+      alias: postgres
+
+test:install_sh:pg18rc1:
+  <<: *install_sh_template
+  image: postgres:18rc1-alpine
+  services:
+    - name: postgres:18rc1-alpine
       alias: postgres
 
 test:install_sh:pg16:
