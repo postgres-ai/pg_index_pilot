@@ -2,11 +2,11 @@
 
 ## Requirements
 
-1. **Self-contained** - Everything inside PostgreSQL
+1. **Self-contained** - Everything inside Postgres
 2. **Non-blocking** - `REINDEX INDEX CONCURRENTLY` only
 3. **Universal** - Works on managed services (no superuser)
 4. **Secure** - No plaintext passwords
-5. **All index types** - Support btree, GIN, GiST, hash, HNSW, and any future index types (BRIN currently excluded due to PostgreSQL bugs)
+5. **All index types** - Support btree, GIN, GiST, hash, HNSW, and any future index types (BRIN currently excluded due to [Postgres bug #17205](https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%40postgresql.org))
 
 ## Design decisions
 
@@ -65,7 +65,7 @@ Fire-and-forget approach:
 ## Compatibility
 
 **Works:**
-- Self-managed PostgreSQL 13+
+- Self-managed Postgres 13+
 - AWS RDS/Aurora
 - Google Cloud SQL
 - Azure Database
@@ -89,7 +89,7 @@ bloat_indicator = index_size / pg_class.reltuples
 ```
 
 **Advantages:**
-- Works with any index type (btree, GIN, GiST, hash, HNSW) except BRIN (excluded due to PostgreSQL bugs)
+- Works with any index type (btree, GIN, GiST, hash, HNSW) except BRIN (excluded due to [Postgres bug #17205](https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%40postgresql.org))
 - Lightweight - no expensive table scans
 - Better precision for fixed-width columns
 - No superuser required
