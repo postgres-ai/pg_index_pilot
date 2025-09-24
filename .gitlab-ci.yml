@@ -126,7 +126,7 @@ test:pg16:
   tags:
     - docker
 
-# Test PostgreSQL 17 (latest)
+# Test PostgreSQL 17
 test:pg17:
   <<: *test_definition
   services:
