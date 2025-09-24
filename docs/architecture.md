@@ -64,11 +64,12 @@ Fire-and-forget approach:
 ## Compatibility
 
 **Works:**
-- PostgreSQL 13+
+- Self-managed PostgreSQL 13+
 - AWS RDS/Aurora
 - Google Cloud SQL
 - Azure Database
 - Supabase
+- Any other managed Postgres or Postgres-compatible DBMS (including AWS Aurora, GCP AlloyDB) where `CREATE DATABASE`, `dblink`, and `postgres_fdw` are available
 
 **Doesn't work:**
 - TimescaleDB Cloud (no `CREATE DATABASE`)
