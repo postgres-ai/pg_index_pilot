@@ -96,7 +96,7 @@ The framework of reindexing is implemented entirely inside Postgres, using:
 ## Requirements
 
 - PostgreSQL version 13.0 or higher
-- **IMPORTANT:** Requires ability to create database (not supported on TigerData)
+- **IMPORTANT:** Requires ability to create database (not supported on TigerData, formerly TimescaleDB Cloud)
 - Separate control database (`index_pilot_control`) to manage target databases
 - `dblink` and `postgres_fdw` extensions installed in control database
 - Database owner or user with appropriate permissions
