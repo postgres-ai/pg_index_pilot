@@ -6,7 +6,7 @@
 2. **Non-blocking** - `REINDEX INDEX CONCURRENTLY` only
 3. **Universal** - Works on managed services (no superuser)
 4. **Secure** - No plaintext passwords
-5. **All index types** - Support btree, GIN, GiST, hash, HNSW, and any future index types
+5. **All index types** - Support btree, GIN, GiST, HNSW, and any future index types (hash indexes not supported by PostgreSQL's `REINDEX CONCURRENTLY`)
 
 ## Design decisions
 
@@ -89,7 +89,7 @@ bloat_indicator = index_size / pg_class.reltuples
 ```
 
 **Advantages:**
-- Works with any index type (btree, GIN, GiST, hash, HNSW)
+- Works with any index type supported by `REINDEX CONCURRENTLY` (btree, GIN, GiST, HNSW)
 - Lightweight - no expensive table scans
 - Better precision for fixed-width columns
 - No superuser required
