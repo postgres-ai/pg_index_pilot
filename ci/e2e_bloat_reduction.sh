@@ -76,7 +76,7 @@ echo "Testing secure FDW connectivity"
 psql_c "${CONTROL_DB}" "select index_pilot._connect_securely('${TARGET_DB}'::name);"
 
 echo "Creating e2e test data (1,000,000 rows) on target"
-psql_c "${CONTROL_DB}" "select dblink_exec('${TARGET_DB}', $$
+psql_c "${CONTROL_DB}" "select dblink_exec('${TARGET_DB}', \$\$
   create schema if not exists e2e;
   drop table if exists e2e.ci_table cascade;
   create table e2e.ci_table(
@@ -89,7 +89,7 @@ psql_c "${CONTROL_DB}" "select dblink_exec('${TARGET_DB}', $$
   select 'user'||g::text||'@ex.com', case when g%3=0 then 'a' else 'b' end from generate_series(1,1000000) as g;
   create index idx_e2e_email on e2e.ci_table(email);
   analyze e2e.ci_table;
-$$);"
+\$\$);"
 
 echo "Initialize baseline and snapshot"
 psql_c "${CONTROL_DB}" "call index_pilot.periodic(false);"
@@ -99,11 +99,11 @@ echo "Lower rebuild threshold for CI to ensure reindex triggers"
 psql_c "${CONTROL_DB}" "select index_pilot.set_or_replace_setting('${TARGET_DB}', null, null, null, 'index_rebuild_scale_factor', '1.05', 'CI threshold');"
 
 echo "Induce bloat: delete ~60% rows and update some"
-psql_c "${CONTROL_DB}" "select dblink_exec('${TARGET_DB}', $$
+psql_c "${CONTROL_DB}" "select dblink_exec('${TARGET_DB}', \$\$
   delete from e2e.ci_table where id % 5 in (0,1,2);
   update e2e.ci_table set status = 'u' where id % 10 = 0;
   analyze e2e.ci_table;
-$$);"
+\$\$);"
 
 echo "Update snapshot and measure bloat before"
 psql_c "${CONTROL_DB}" "call index_pilot.periodic(false);"

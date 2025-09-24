@@ -354,9 +354,4 @@ e2e:bloat-reduction:
     - chmod +x ci/e2e_bloat_reduction.sh
   script:
     - ./ci/e2e_bloat_reduction.sh
-  artifacts:
-    when: always
-    paths:
-      - e2e.log
-    expire_in: 1 week
   timeout: 1h
