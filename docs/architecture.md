@@ -6,6 +6,7 @@
 2. **Non-blocking** - `REINDEX INDEX CONCURRENTLY` only
 3. **Universal** - Works on managed services (no superuser)
 4. **Secure** - No plaintext passwords
+5. **All index types** - Support btree, GIN, GiST, hash, HNSW, and any future index types
 
 ## Design decisions
 
