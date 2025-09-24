@@ -22,20 +22,24 @@ psql_base() {
 }
 
 psql_c() {
-  local db="$1"; shift
+  local db="$1"
+  shift
   psql_base -d "${db}" -v ON_ERROR_STOP=on -At -c "$*"
 }
 
 psql_f() {
-  local db="$1"; shift
-  local file="$1"; shift
+  local db="$1"
+  shift
+  local file="$1"
+  shift
   psql_base -d "${db}" -v ON_ERROR_STOP=on -f "${file}" "$@"
 }
 
 echo "Waiting for Postgres at ${DB_HOST}:${DB_PORT} ..."
 for i in {1..120}; do
-  if psql_base -d postgres -At -c "select 1" >/dev/null 2>&1; then
-    echo "Postgres is up"; break
+  if psql_base -d postgres -At -c "select 1" > /dev/null 2>&1; then
+    echo "Postgres is up"
+    break
   fi
   sleep 1
   if [[ "$i" == "120" ]]; then
@@ -110,7 +114,7 @@ echo "Run periodic real pass (reindex if above threshold)"
 psql_c "${CONTROL_DB}" "call index_pilot.periodic(true,false);"
 
 echo "Measure sizes before/after from history for our index"
-read -r SIZE_BEFORE SIZE_AFTER <<<"$(psql_c "${CONTROL_DB}" "select indexsize_before, indexsize_after from index_pilot.reindex_history where datname='${TARGET_DB}' and schemaname='e2e' and indexrelname='idx_e2e_email' and status='completed' order by entry_timestamp desc limit 1;" )"
+read -r SIZE_BEFORE SIZE_AFTER <<< "$(psql_c "${CONTROL_DB}" "select indexsize_before, indexsize_after from index_pilot.reindex_history where datname='${TARGET_DB}' and schemaname='e2e' and indexrelname='idx_e2e_email' and status='completed' order by entry_timestamp desc limit 1;")"
 
 if [[ -z "${SIZE_BEFORE}" || -z "${SIZE_AFTER}" ]]; then
   echo "No completed reindex record found for idx_e2e_email" >&2
@@ -135,4 +139,3 @@ awk -v a="${SIZE_AFTER}" -v b="${SIZE_BEFORE}" 'BEGIN { if (a+0 <= b+0) exit 0; 
 }
 
 echo "Index size decreased — PASS"
-
