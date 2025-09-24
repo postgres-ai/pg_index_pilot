@@ -6,6 +6,7 @@ set -euo pipefail
 exec > >(tee -a e2e.log) 2>&1
 
 # Env
+export PAGER=cat
 DB_HOST="${DB_HOST:-postgres}"
 DB_PORT="${DB_PORT:-5432}"
 DB_NAME="${DB_NAME:-test_index_pilot}"
@@ -18,7 +19,7 @@ TARGET_DB="${DB_NAME}"
 export PGPASSWORD="${DB_PASS:-${POSTGRES_PASSWORD:-postgres}}"
 
 psql_base() {
-  PAGER=cat psql --no-psqlrc -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" "$@"
+  psql --no-psqlrc -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" "$@"
 }
 
 psql_c() {
