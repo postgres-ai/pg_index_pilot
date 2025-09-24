@@ -744,15 +744,16 @@ begin
     indexsize,
     indisvalid, 
     estimated_tuples,
-  case
-  -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
-  when (_force_populate and indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size'))) then 
-    indexsize::real / estimated_tuples::real
-  -- best_ratio estimation are null for the new index entries because we don't have any bloat information for it (default behavior)
-  else
-      null
-  end
-  as best_ratio
+    case
+      when (indexsize > pg_size_bytes(index_pilot.get_setting(datname, schemaname, relname, indexrelname, 'minimum_reliable_index_size'))) then
+        -- initialize baseline from the current ratio on first sighting (insert),
+        -- including after REINDEX/OID change; _force_populate is not needed on insert
+        indexsize::real / estimated_tuples::real
+      else
+        -- too small for reliable baseline
+          null
+      end
+    as best_ratio
   from _actual_indexes
   on conflict (datid, indexrelid)
   do update set
@@ -766,19 +767,17 @@ begin
     estimated_tuples = excluded.estimated_tuples,
     best_ratio =
       case
-      -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
-      when (_force_populate and excluded.indexsize > pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
-        then excluded.indexsize::real / excluded.estimated_tuples::real
-      -- if the new index size less than minimum_reliable_index_size - we cannot use it as reliable gauge for the best_ratio
-      -- so keep old best_ratio value instead as best guess
-      when (excluded.indexsize < pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
-        then i.best_ratio
-      -- do not overrrid null best ratio (we don't have any reliable ratio info at this stage)
-      when (i.best_ratio is null)
-        then null
-      -- set best_value as least from current value and new one
-      else
-  least(i.best_ratio, excluded.indexsize::real / excluded.estimated_tuples::real)
+        -- _force_populate=true set (or write) best ratio to current ratio (except the case when index too small to be reliably estimated)
+        when (_force_populate and excluded.indexsize > pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
+          then excluded.indexsize::real / excluded.estimated_tuples::real
+        -- if index is too small, keep previous
+        when (excluded.indexsize < pg_size_bytes(index_pilot.get_setting(excluded.datname, excluded.schemaname, excluded.relname, excluded.indexrelname, 'minimum_reliable_index_size')))
+          then i.best_ratio
+        -- fill only if missing
+        when (i.best_ratio is null)
+          then excluded.indexsize::real / excluded.estimated_tuples::real
+        -- otherwise keep baseline unchanged (non-increasing, unaffected by reltuples drift)
+        else least(i.best_ratio, excluded.indexsize::real / excluded.estimated_tuples::real)
       end;
 
   -- tell about not valid indexes
@@ -1342,7 +1341,7 @@ language plpgsql;
  * Main periodic execution procedure for automated index maintenance
  * Primary entry point for scheduled operations: validates, migrates, processes databases
  */
-create procedure index_pilot.periodic(
+create or replace procedure index_pilot.periodic(
   real_run boolean default false,
   force boolean default false
 ) as
@@ -1384,6 +1383,8 @@ begin
           
       if real_run then
         call index_pilot.do_reindex(_datname, null, null, null, force);
+        -- refresh snapshot right after reindex to clamp baseline with current ratio
+        perform index_pilot._record_indexes_info(_datname, null, null, null);
       end if;
     end loop;
         
