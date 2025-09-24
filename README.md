@@ -19,6 +19,8 @@ Docs: [Installation](docs/installation.md) | [Runbook](docs/runbook.md) | [FAQ](
 - Supports reindexing of all common index types (btree, hash, gin, gist, spgist); brin is currently excluded.
 - Control DB orchestrates multiple target databases via `postgres_fdw`/`dblink`; reindexing is executed with `reindex concurrently` to minimize locking.
 
+See [Architecture](docs/architecture.md) for detailed design decisions and requirements.
+
 ## Table of contents
 
 - [Roadmap](#roadmap)
@@ -54,7 +56,7 @@ The roadmap covers three big areas:
     4. [x] Tested on managed services
         - [x] RDS and Aurora (see AWS specifics in Installation: docs/installation.md#aws-rds--aurora-specifics)
         - [ ] CloudSQL
-        - [ ] Supabase
+        - [x] Supabase
         - [ ] Crunchy Bridge
         - [ ] Azure
     5. [ ] Integration with postgres_ai monitoring
