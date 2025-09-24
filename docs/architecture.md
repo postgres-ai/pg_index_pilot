@@ -73,7 +73,7 @@ Fire-and-forget approach:
 - Any other managed Postgres or Postgres-compatible DBMS (including AWS Aurora, GCP AlloyDB) where `CREATE DATABASE`, `dblink`, and `postgres_fdw` are available
 
 **Doesn't work:**
-- TimescaleDB Cloud (no `CREATE DATABASE`)
+- TigerData (no `CREATE DATABASE`)
 
 **Extensions:**
 - `dblink` (required)
