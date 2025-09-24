@@ -6,7 +6,7 @@
 2. **Non-blocking** - `REINDEX INDEX CONCURRENTLY` only
 3. **Universal** - Works on managed services (no superuser)
 4. **Secure** - No plaintext passwords
-5. **All index types** - Support btree, GIN, GiST, HNSW and so on (BRIN currently excluded due to [Postgres bug #17205](https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%40postgresql.org))
+5. **Not only btree** - Support btree, GIN, GiST, HNSW and so on (BRIN currently excluded due to [Postgres bug #17205](https://www.postgresql.org/message-id/flat/17205-42b1d8f131f0cf97%40postgresql.org))
 
 ## Design decisions
 
