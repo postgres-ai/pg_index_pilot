@@ -82,7 +82,7 @@ Fire-and-forget approach:
 
 ## Bloat detection formula
 
-Uses Maxim Boguk's formula instead of traditional inaccurate bloat estimates (btree-only) or heavy `pgstattuple`-based methods (unusable in large databases):
+Uses Maxim Boguk's formula (originally implemented in `pg_index_watch`) instead of traditional inaccurate bloat estimates (btree-only) or heavy `pgstattuple`-based methods (unusable in large databases):
 
 ```
 bloat_indicator = index_size / pg_class.reltuples
