@@ -4,7 +4,7 @@ The purpose of `pg_index_pilot` is to provide all tools needed to manage indexes
 
 This project is in its very early stage. We start with most boring yet extremely important task: automatic reindexing ("AR") to mitigate index bloat, supporting any types of indexes, and then expand to other areas of index health. And then expand to two other big areas – automated index removal ("AIR") and, finally, automated index creation and optimization ("AIC&O"). It is a part of the Self‑driving Postgres, but can be used independently as a standalone tool.
 
-Docs: [Installation](docs/installation.md) | [Runbook](docs/runbook.md) | [FAQ](docs/faq.md) | [Boguk formula](docs/boguk_formula.md) | [Function reference](docs/function_reference.md) | [Architecture](docs/architecture_managed_services.md)
+Docs: [Installation](docs/installation.md) | [Runbook](docs/runbook.md) | [FAQ](docs/faq.md) | [Function reference](docs/function_reference.md) | [Architecture](docs/architecture.md)
 
 ## What it is for
 

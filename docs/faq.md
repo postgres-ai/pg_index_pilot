@@ -30,7 +30,7 @@ PGPASSWORD='your_password' ./install.sh uninstall -H <host> -U <user> -C <contro
 
 ### Bloat
 
-- **How is bloat measured?** - Using the Boguk formula: factor (x) = current index size over the best-known size-per-tuple baseline (see [docs/boguk_formula.md](docs/boguk_formula.md)).
+- **How is bloat measured?** - Using the Boguk formula: factor (x) = current index size over the best-known size-per-tuple baseline (see [Architecture](architecture.md#bloat-detection-formula)).
 ```sql
 -- Factor, not percent (2.0 = 2x)
 -- estimated_bloat = indexsize / (best_ratio * estimated_tuples)
