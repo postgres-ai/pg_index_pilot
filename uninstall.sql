@@ -2,11 +2,23 @@
 -- This script completely removes pg_index_pilot from your database
 -- WARNING: This will delete all collected statistics and history!
 
--- 1. Drop the schema cascade (this removes all objects)
-drop schema if exists index_pilot cascade;
+-- 1. Drop all FDW servers registered in index_pilot.target_databases
+do $$
+declare r record;
+begin
+  for r in select distinct fdw_server_name from index_pilot.target_databases loop
+    begin
+      execute format('drop server if exists %I cascade', r.fdw_server_name);
+    exception when others then
+      perform 1;
+    end;
+  end loop;
+exception when undefined_table then
+  perform 1;
+end $$;
 
--- 2. Drop the FDW server and user mappings if they exist
-drop server if exists index_pilot_self cascade;
+-- 2. Drop the schema cascade (this removes all objects)
+drop schema if exists index_pilot cascade;
 
 -- 3. Note about invalid indexes
 -- Invalid _ccnew* indexes might exist from failed reindex operations
