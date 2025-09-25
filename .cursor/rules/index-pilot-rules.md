@@ -87,7 +87,7 @@ Examples:
 grep -E "EXECUTE.*\|\|" *.sql
 
 # Verify FDW setup
-psql -c "SELECT * FROM pg_foreign_server WHERE srvname = 'index_pilot_self'"
+psql -c "select * from pg_foreign_server where srvname like 'target_%'"
 ```
 
 ## Priority Order

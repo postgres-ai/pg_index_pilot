@@ -114,19 +114,6 @@ create extension if not exists postgres_fdw;
 -- Grant usage on extensions
 grant usage on foreign data wrapper postgres_fdw to index_pilot;
 
--- Grant execute permissions for dblink functions
-do $$
-begin
-  -- Try to grant dblink_connect_u permissions (may need explicit grant on some managed services)
-  begin
-    execute 'grant execute on function dblink_connect_u(text,text) to index_pilot';
-    raise notice 'Granted dblink_connect_u permissions';
-  exception
-    when insufficient_privilege or undefined_function then
-      raise notice 'Could not grant dblink_connect_u permissions - may need manual grant';
-  end;
-end $$;
-
 -- Summary
 do $$
 begin
@@ -144,8 +131,7 @@ begin
   raise notice '   psql -U index_pilot -d % -c "SELECT index_pilot.setup_user_mapping(''index_pilot'', ''your_secure_password'');"', current_database();
   raise notice '';
   raise notice '4. Create USER MAPPING for admin (managed services only):';
-  raise notice '   psql -U postgres -d % -c "CREATE USER MAPPING FOR postgres SERVER index_pilot_self OPTIONS (user ''index_pilot'', password ''your_secure_password'');"', current_database();
-  raise notice '   psql -U postgres -d % -c "CREATE USER MAPPING FOR rds_superuser SERVER index_pilot_self OPTIONS (user ''index_pilot'', password ''your_secure_password'');"', current_database();
+  raise notice '   psql -U postgres -d % -c "CREATE USER MAPPING FOR postgres SERVER target_your_database OPTIONS (user ''index_pilot'', password ''your_secure_password'');"', current_database();
   raise notice '';
   raise notice '5. Test the installation:';
   raise notice '   psql -U index_pilot -d % -c "SELECT * FROM index_pilot.check_permissions();"', current_database();

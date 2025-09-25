@@ -103,13 +103,13 @@ Please honor the rules defined in `.cursor/rules/` directory when working on thi
 
 ### FDW Connection Issues
 - In Docker/CI: Try localhost, 127.0.0.1, or container IP
-- On RDS: Ensure rds_superuser has proper user mapping
+- On RDS: Ensure current_user has proper user mapping
 - Always test connection with `_connect_securely()` before operations
 
 ### Test Failures
 - Check FDW is properly configured
 - Verify postgres_fdw extension is installed
-- Ensure user mappings exist for both regular user and rds_superuser
+- Ensure user mappings exist for the current user
 
 ### Performance Considerations
 - Bloat checking is resource-intensive - runs periodically
