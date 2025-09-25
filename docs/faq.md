@@ -1,12 +1,12 @@
 ## FAQ
 
-### Installer (install.sh)
+### Installer (index_pilot.sh)
 
 - **How do I install quickly?** - Use the installer.
 ```bash
-PGPASSWORD='your_password' ./install.sh install-control -H <host> -U <user> -C <control_db>
-PGPASSWORD='your_password' ./install.sh register-target -H <host> -U <user> -C <control_db> -T <db> --fdw-host <target_host>
-PGPASSWORD='your_password' ./install.sh verify -H <host> -U <user> -C <control_db>
+PGPASSWORD='your_password' ./index_pilot.sh install-control -H <host> -U <user> -C <control_db>
+PGPASSWORD='your_password' ./index_pilot.sh register-target -H <host> -U <user> -C <control_db> -T <db> --fdw-host <target_host>
+PGPASSWORD='your_password' ./index_pilot.sh verify -H <host> -U <user> -C <control_db>
 ```
 
 - **What are the common flags and defaults?**
@@ -25,7 +25,7 @@ PGPASSWORD='your_password' ./install.sh verify -H <host> -U <user> -C <control_d
 
 - **How do I uninstall?**
 ```bash
-PGPASSWORD='your_password' ./install.sh uninstall -H <host> -U <user> -C <control_db> --drop-servers
+PGPASSWORD='your_password' ./index_pilot.sh uninstall -H <host> -U <user> -C <control_db> --drop-servers
 ```
 
 ### Bloat
