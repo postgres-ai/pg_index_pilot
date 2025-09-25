@@ -78,14 +78,10 @@ psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_contro
 create server if not exists target_your_database foreign data wrapper postgres_fdw
   options (host 'your-instance.region.rds.amazonaws.com', port '5432', dbname 'your_database');
 
--- dblink_connect_u uses current_user mapping; create mapping for the user running control DB (often postgres or index_pilot)
+-- dblink_connect(server_name) uses current_user mapping; create mapping for the user running control DB (often postgres or index_pilot)
 create user mapping if not exists for current_user server target_your_database
   options (user 'remote_owner_or_role', password 'remote_password');
 
--- RDS/Aurora only: create mapping for rds_superuser if the role exists
-drop user mapping if exists for rds_superuser server target_your_database;
-create user mapping for rds_superuser server target_your_database
-  options (user 'remote_owner_or_role', password 'remote_password');
 SQL
 
 # 5. Register the TARGET database (links index_pilot.target_databases to your FDW server)
@@ -128,7 +124,7 @@ psql -U postgres -d index_pilot_control -f index_pilot_fdw.sql
 psql -U postgres -d index_pilot_control \
   -c "select index_pilot.setup_connection('127.0.0.1', 5432, 'postgres', 'postgres');"  # Use actual password
 
-# 5. Create FDW server and user mapping for the TARGET database (not index_pilot_self)
+# 5. Create FDW server and user mapping for the TARGET database
 psql -U postgres -d index_pilot_control <<'SQL'
 create server if not exists target_your_database foreign data wrapper postgres_fdw
   options (host '127.0.0.1', port '5432', dbname 'your_database');
@@ -234,8 +230,8 @@ The core flow above works the same on AWS. The following items are specific to R
   - If the control DB and target DB are on the same instance, prefer creating the control DB there for simpler networking.
 
 - Roles and user mappings
-  - `dblink_connect_u` uses the mapping for the control DB `current_user`. Ensure a user mapping exists for that user to `index_pilot_self` and each `target_<db>` server.
-  - If the role `rds_superuser` exists, you may optionally create a mapping for it for administrative sessions.
+  - `dblink_connect(server_name)` uses the mapping for the control DB `current_user`. Ensure a user mapping exists for that user to each `target_<db>` server.
+  - Ensure the current_user has a user mapping for the FDW server.
 
 - Monitoring and logs
   - Progress on target DB: `select * from pg_stat_progress_create_index where command='REINDEX CONCURRENTLY';`
