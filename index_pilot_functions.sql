@@ -8,7 +8,7 @@ set client_min_messages to warning;
  * Returns version string for compatibility checks and diagnostics
  */
 create function index_pilot.version() returns text as $body$
-  select '0.1.0';
+  select '0.1.beta1';
 $body$ language sql immutable;
 
 
