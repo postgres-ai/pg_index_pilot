@@ -38,7 +38,8 @@ begin
     _fdw_server_name text;
   begin
     -- Control database architecture is REQUIRED - get the FDW server for the target database
-    select fdw_server_name into _fdw_server_name
+    select fdw_server_name
+    into _fdw_server_name
     from index_pilot.target_databases
     where database_name = _datname
     and enabled = true;
@@ -51,15 +52,16 @@ begin
         ),
         hint = 'Control database setup required.';
     end if;
-        
-    perform dblink_connect_u(_datname, _fdw_server_name);
+
+    -- Use user mapping via postgres_fdw: dblink_connect with server name (no plaintext passwords)
+    perform dblink_connect(_datname, _fdw_server_name);
 
   exception when others then
     raise exception using
       message = format(
         'FDW connection failed for database %s using server %s: %s',
         _datname,
-        _fdw_server_name,
+        coalesce(_fdw_server_name, '<unknown>'),
         sqlerrm
       );
   end;

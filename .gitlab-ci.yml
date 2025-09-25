@@ -246,7 +246,6 @@ test:nonsuperuser:
       CREATE EXTENSION dblink;
       CREATE EXTENSION postgres_fdw;
       GRANT USAGE ON FOREIGN DATA WRAPPER postgres_fdw TO index_pilot;
-      GRANT EXECUTE ON FUNCTION dblink_connect_u(text,text) TO index_pilot;
       EOF
     - |
       echo "Installing as non-superuser..."
@@ -267,8 +266,6 @@ test:nonsuperuser:
       SELECT index_pilot.setup_user_mapping('postgres', '$POSTGRES_PASSWORD');
       -- Create user mapping for index_pilot
       SELECT index_pilot.setup_user_mapping('index_pilot', 'testpass');
-      -- Grant usage on the server to index_pilot
-      GRANT USAGE ON FOREIGN SERVER index_pilot_self TO index_pilot;
       EOF
     - |
       echo "Running non-superuser tests..."
@@ -341,3 +338,17 @@ quality:sql:
   tags:
     - docker
   allow_failure: true
+
+# End-to-end bloat reduction test
+e2e:bloat-reduction:
+  stage: test
+  image: postgres:17-alpine
+  services:
+    - name: postgres:17-alpine
+      alias: postgres
+  before_script:
+    - apk add --no-cache bash coreutils
+    - chmod +x ci/e2e_bloat_reduction.sh
+  script:
+    - ./ci/e2e_bloat_reduction.sh
+  timeout: 1h

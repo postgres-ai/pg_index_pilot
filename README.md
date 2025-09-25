@@ -54,7 +54,7 @@ The roadmap covers three big areas:
     4. [x] Tested on managed services
         - [x] RDS and Aurora (see AWS specifics in Installation: docs/installation.md#aws-rds--aurora-specifics)
         - [ ] CloudSQL
-        - [ ] Supabase
+        - [x] Supabase
         - [ ] Crunchy Bridge
         - [ ] Azure
     5. [ ] Integration with postgres_ai monitoring
@@ -199,14 +199,9 @@ psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_contro
 create server if not exists target_<your_database> foreign data wrapper postgres_fdw
   options (host 'your-instance.region.rds.amazonaws.com', port '5432', dbname 'your_database');
 
--- dblink_connect_u uses current_user mapping; create mapping for the user running control DB (often postgres or index_pilot)
+-- dblink_connect(server_name) uses current_user user mapping; create mapping for the user running control DB (often postgres or index_pilot)
 create user mapping if not exists for current_user server target_<your_database>
   options (user 'remote_owner_or_role', password 'remote_password');
-
--- RDS/Aurora only: create mapping for rds_superuser if the role exists
-drop user mapping if exists for rds_superuser server target_your_database;
-create user mapping for rds_superuser server target_your_database
-  options (user 'remote_owner_or_role', password 'remote_password');  
 SQL
 
 # 5. Register the TARGET database (links index_pilot.target_databases to your FDW server)
