@@ -318,20 +318,11 @@ register_target() {
     values ('${TARGET_DB}', '${fdw_host}', ${DB_PORT}, '${server}', true)
     on conflict (database_name) do update set host=excluded.host, port=excluded.port, fdw_server_name=excluded.fdw_server_name, enabled=true;"
 
-  # User mapping for current user (use provided password)
+  # User mapping for current_user (managed-services friendly)
   if [[ -n "${DB_PASS}" ]]; then
-    print_info "Ensuring user mapping for ${DB_USER} on server ${server}"
-    psql_cmd "${CONTROL_DB}" "drop user mapping if exists for \"${DB_USER}\" server ${server};" || true
-    psql_cmd "${CONTROL_DB}" "create user mapping for \"${DB_USER}\" server ${server} options (user '${DB_USER}', password '${DB_PASS}');" || true
-    # RDS: mapping for rds_superuser if role exists (inline variables to avoid psql :-vars)
-    psql_cmd "${CONTROL_DB}" "do \$\$ begin
-      if exists (select 1 from pg_roles where rolname = 'rds_superuser') then
-        begin
-          execute format('drop user mapping if exists for %I server %I', 'rds_superuser', '${server}');
-        exception when others then perform 1; end;
-        execute format('create user mapping for %I server %I options (user %L, password %L)', 'rds_superuser', '${server}', '${DB_USER}', '${DB_PASS}');
-      end if;
-    end \$\$;" || true
+    print_info "Ensuring user mapping for current_user on server ${server}"
+    psql_cmd "${CONTROL_DB}" "drop user mapping if exists for current_user server ${server};" || true
+    psql_cmd "${CONTROL_DB}" "create user mapping for current_user server ${server} options (user '${DB_USER}', password '${DB_PASS}');" || true
   else
     print_info "Skipping user mapping password setup (PGPASSWORD not set)"
   fi

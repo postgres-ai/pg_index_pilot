@@ -62,6 +62,6 @@ PGPASSWORD='your_password' ./install.sh uninstall -H <host> -U <user> -C <contro
 ```
 
 ### Managed services notes
-- Creates a user mapping for `rds_superuser` when the role exists (AWS RDS/Aurora).
+- Creates user mappings for the current user on the FDW server.
 - Use `--fdw-host` reachable from the database server instance (container/VM network context), not necessarily your client.
 
