@@ -108,7 +108,7 @@ The framework of reindexing is implemented entirely inside Postgres, using:
 
 ## Installation
 
-### Quick install via install.sh
+### Quick install via index_pilot.sh
 
 ```bash
 # Clone the repository
@@ -117,23 +117,23 @@ cd pg_index_pilot
 
 # 1) Install into control database (auto-creates DB, installs extensions/objects)
 PGPASSWORD='your_password' \
-  ./install.sh install-control \
+  ./index_pilot.sh install-control \
   -H your_host -U your_user -C your_control_db_name
 
 # 2) Register a target database via FDW (secure user mapping)
 PGPASSWORD='your_password' \
-  ./install.sh register-target \
+  ./index_pilot.sh register-target \
   -H your_host -U your_user -C your_control_db_name \
   -T your_database --fdw-host your_host
 
 # 3) Verify installation and environment
 PGPASSWORD='your_password' \
-  ./install.sh verify \
+  ./index_pilot.sh verify \
   -H your_host -U your_user -C your_control_db_name
 
 # (Optional) Uninstall
 PGPASSWORD='your_password' \
-  ./install.sh uninstall \
+  ./index_pilot.sh uninstall \
   -H your_host -U your_user -C your_control_db_name --drop-servers
 ```
 
