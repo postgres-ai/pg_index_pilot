@@ -269,7 +269,7 @@ psql -h <host> -U <user> -d <index_pilot_control_db> -f uninstall.sql
 Using the installer:
 ```bash
 PGPASSWORD='your_password' \
-  ./install.sh uninstall -H <control_host> -U <admin_user> -C <index_pilot_control_db> --drop-servers
+  ./index_pilot.sh uninstall -H <control_host> -U <admin_user> -C <index_pilot_control_db> --drop-servers
 ```
 
 ## Upgrades
