@@ -13,6 +13,10 @@
 ### `pg_cron` for scheduling
 Enables self-contained operation without external schedulers. Available on most managed services. Optional - can trigger externally if unavailable.
 
+We support two deployment scenarios:
+- If pg_cron is not yet installed: install `pg_cron` in the control database (e.g., `index_pilot_control`). This keeps scheduling self-contained in the control DB.
+- If pg_cron is already installed in another database: keep it as is and schedule jobs from that database using `cron.schedule_in_database(...)` to run commands in `index_pilot_control`. Note that pg_cron may only be installed in one database per cluster; `cron.schedule_in_database` is the supported way to run jobs targeting other databases.
+
 ### `dblink` for separate connections
 `REINDEX INDEX CONCURRENTLY` cannot run in transaction blocks. `dblink` creates separate connection to execute reindex operations without blocking the control session.
 
