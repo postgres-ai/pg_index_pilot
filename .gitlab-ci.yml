@@ -158,20 +158,20 @@ test:pg17:
       POSTGRES_IP=$(psql -h postgres -U postgres -d postgres -tAc "select host(inet_server_addr())")
       echo "POSTGRES_IP=$POSTGRES_IP"
       if [ -z "$POSTGRES_IP" ]; then echo "ERROR: cannot determine Postgres IP"; exit 1; fi  
-    - chmod +x ./install.sh
+    - chmod +x ./index_pilot.sh
   script:
     - |
-      echo "Running install-control via install.sh (host=postgres)"
-      ./install.sh install-control \
+      echo "Running install-control via index_pilot.sh (host=postgres)"
+      ./index_pilot.sh install-control \
         -H "$POSTGRES_IP" -P 5432 -U postgres -W "$PGPASSWORD" -C "$CONTROL_DB"
     - |
-      echo "Registering target via install.sh"
-      ./install.sh register-target \
+      echo "Registering target via index_pilot.sh"
+      ./index_pilot.sh register-target \
         -H postgres -P 5432 -U postgres -W "$PGPASSWORD" -C "$CONTROL_DB" \
         -T "$TARGET_DB" --server-name "target_${TARGET_DB}" --fdw-host localhost --force
     - |
-      echo "Verifying install via install.sh"
-      ./install.sh verify -H postgres -P 5432 -U postgres -W "$PGPASSWORD" -C "$CONTROL_DB" | tee /tmp/verify.txt
+      echo "Verifying install via index_pilot.sh"
+      ./index_pilot.sh verify -H postgres -P 5432 -U postgres -W "$PGPASSWORD" -C "$CONTROL_DB" | tee /tmp/verify.txt
     - |
       echo "Asserting target is registered in control DB"
       grep -q "registered targets|t|postgres" /tmp/verify.txt
