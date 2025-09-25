@@ -8,7 +8,7 @@ set client_min_messages to warning;
  * Returns version string for compatibility checks and diagnostics
  */
 create function index_pilot.version() returns text as $body$
-  select '0.1.0';
+  select '0.1.beta1';
 $body$ language sql immutable;
 
 
@@ -252,19 +252,25 @@ begin
       'Do not register the control database as a target';
   end if;
 
-  -- Best-effort FDW connectivity test
+  -- Best-effort FDW connectivity test (use any enabled target's fdw_server_name)
   begin
-    perform dblink_connect_u('env_test', 'index_pilot_self');
+    perform dblink_connect(
+      'env_test',
+      coalesce(
+        (select fdw_server_name from index_pilot.target_databases where enabled limit 1),
+        null
+      )
+    );
     perform dblink_disconnect('env_test');
     _fdw_self_ok := true;
-    exception when others then
+  exception when others then
     _fdw_self_ok := false;
   end;
 
   return query select 
     'FDW self-connection test'::text,
     _fdw_self_ok,
-    case when _fdw_self_ok then 'Connected via user mapping' else 'Run setup_fdw_self_connection() and setup_user_mapping()' end;
+    case when _fdw_self_ok then 'Connected via user mapping' else 'Ensure at least one enabled target with valid user mapping' end;
 
   return;
 end;

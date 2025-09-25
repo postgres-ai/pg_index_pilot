@@ -110,7 +110,7 @@ The framework of reindexing is implemented entirely inside Postgres, using:
 
 ## Installation
 
-### Quick install via install.sh
+### Quick install via index_pilot.sh
 
 ```bash
 # Clone the repository
@@ -119,23 +119,23 @@ cd pg_index_pilot
 
 # 1) Install into control database (auto-creates DB, installs extensions/objects)
 PGPASSWORD='your_password' \
-  ./install.sh install-control \
+  ./index_pilot.sh install-control \
   -H your_host -U your_user -C your_control_db_name
 
 # 2) Register a target database via FDW (secure user mapping)
 PGPASSWORD='your_password' \
-  ./install.sh register-target \
+  ./index_pilot.sh register-target \
   -H your_host -U your_user -C your_control_db_name \
   -T your_database --fdw-host your_host
 
 # 3) Verify installation and environment
 PGPASSWORD='your_password' \
-  ./install.sh verify \
+  ./index_pilot.sh verify \
   -H your_host -U your_user -C your_control_db_name
 
 # (Optional) Uninstall
 PGPASSWORD='your_password' \
-  ./install.sh uninstall \
+  ./index_pilot.sh uninstall \
   -H your_host -U your_user -C your_control_db_name --drop-servers
 ```
 
@@ -201,14 +201,9 @@ psql -h your-instance.region.rds.amazonaws.com -U postgres -d index_pilot_contro
 create server if not exists target_<your_database> foreign data wrapper postgres_fdw
   options (host 'your-instance.region.rds.amazonaws.com', port '5432', dbname 'your_database');
 
--- dblink_connect_u uses current_user mapping; create mapping for the user running control DB (often postgres or index_pilot)
+-- dblink_connect(server_name) uses current_user user mapping; create mapping for the user running control DB (often postgres or index_pilot)
 create user mapping if not exists for current_user server target_<your_database>
   options (user 'remote_owner_or_role', password 'remote_password');
-
--- RDS/Aurora only: create mapping for rds_superuser if the role exists
-drop user mapping if exists for rds_superuser server target_your_database;
-create user mapping for rds_superuser server target_your_database
-  options (user 'remote_owner_or_role', password 'remote_password');  
 SQL
 
 # 5. Register the TARGET database (links index_pilot.target_databases to your FDW server)
