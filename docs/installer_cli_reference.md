@@ -1,7 +1,7 @@
 ## Installer CLI reference
 
 ```bash
-Usage: ./install.sh <subcommand> [options]
+Usage: ./index_pilot.sh <subcommand> [options]
 
 Subcommands:
   install-control     Install schema/functions into control DB
@@ -42,23 +42,23 @@ Environment:
 ```bash
 # Install into control DB
 PGPASSWORD='your_password' \
-  ./install.sh install-control -H <host> -U <user> -C <control_db>
+  ./index_pilot.sh install-control -H <host> -U <user> -C <control_db>
 
 # Register a target (creates/updates FDW server and user mapping, tests connection)
 PGPASSWORD='your_password' \
-  ./install.sh register-target -H <host> -U <user> -C <control_db> \
+  ./index_pilot.sh register-target -H <host> -U <user> -C <control_db> \
   -T <db> --fdw-host <target_host>
 
 # Force recreate server and update registration, custom server name
 PGPASSWORD='your_password' \
-  ./install.sh register-target -H <host> -U <user> -C <control_db> \
+  ./index_pilot.sh register-target -H <host> -U <user> -C <control_db> \
   -T <db> --server-name target_<db> --force
 
 # Verify installation and environment
-PGPASSWORD='your_password' ./install.sh verify -H <host> -U <user> -C <control_db>
+PGPASSWORD='your_password' ./index_pilot.sh verify -H <host> -U <user> -C <control_db>
 
 # Uninstall and (optionally) drop FDW servers referenced by inventory
-PGPASSWORD='your_password' ./install.sh uninstall -H <host> -U <user> -C <control_db> --drop-servers
+PGPASSWORD='your_password' ./index_pilot.sh uninstall -H <host> -U <user> -C <control_db> --drop-servers
 ```
 
 ### Managed services notes

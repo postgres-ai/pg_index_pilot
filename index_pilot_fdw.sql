@@ -127,7 +127,7 @@ begin
       when exists (select from index_pilot.target_databases) then 'YES'
       else 'NO'
     end::text,
-    'Register targets: (SQL) create server + user mapping + insert into index_pilot.target_databases; or use install.sh register-target'::text;
+    'Register targets: (SQL) create server + user mapping + insert into index_pilot.target_databases; or use index_pilot.sh register-target'::text;
 
   -- Check user mapping for current user on at least one target server
   return query select
