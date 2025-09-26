@@ -64,7 +64,7 @@ export DB_PASS=mypass
 
 ### GitLab CI
 The project includes `.gitlab-ci.yml` which:
-- Tests against PostgreSQL versions 13, 14, 15, 16, and 17
+- Tests against PostgreSQL versions 13, 14, 15, 16, 17, and 18
 - Runs security scans for hardcoded passwords and SQL injection
 - Tests non-superuser mode (simulating managed services)
 - Generates JUnit reports for test visualization
