@@ -136,10 +136,10 @@ test:pg17:
     - docker
 
 # Test PostgreSQL 18 RC1
-test:pg18rc1:
+test:pg18:
   <<: *test_definition
   services:
-    - name: postgres:18rc1-alpine
+    - name: postgres:18-alpine
       alias: postgres
   tags:
     - docker
@@ -197,7 +197,7 @@ test:install_sh:pg17:
 
 test:install_sh:pg18rc1:
   <<: *install_sh_template
-  image: postgres:18rc1-alpine
+  image: postgres:18-alpine
   services:
     - name: postgres:18rc1-alpine
       alias: postgres
