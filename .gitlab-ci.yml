@@ -195,7 +195,7 @@ test:install_sh:pg17:
     - name: postgres:17-alpine
       alias: postgres
 
-test:install_sh:pg18rc1:
+test:install_sh:pg18:
   <<: *install_sh_template
   image: postgres:18-alpine
   services:
