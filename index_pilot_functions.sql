@@ -1466,6 +1466,7 @@ declare
   _relname name;
   _indexrelname name;
   _id bigint;
+  _deadline_override timestamptz;
 begin
   -- Validate PostgreSQL version safety
   perform index_pilot._validate_pg_version();
@@ -1477,18 +1478,9 @@ begin
   perform index_pilot.check_update_structure_version();
 
   -- Determine deadline from maintenance windows if not provided via window_duration
-  declare
-    _deadline_override timestamptz;
-  begin
-    if window_duration is null then
-      -- Attempt to compute current window end based on maintenance_windows
-      begin
-        _deadline_override := index_pilot._get_current_window_end(current_database());
-      exception when undefined_function then
-        _deadline_override := null; -- helper not yet defined
-      end;
-    end if;
-  end;
+  if window_duration is null then
+    _deadline_override := index_pilot._get_current_window_end(current_database());
+  end if;
 
   -- Check if we're in control database mode
   if exists (select from pg_tables where schemaname = 'index_pilot' and tablename = 'target_databases') then
