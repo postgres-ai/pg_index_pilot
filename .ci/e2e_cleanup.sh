@@ -28,17 +28,17 @@ psql_c() {
 }
 
 echo "[cleanup] Dropping maintenance windows"
-psql_c postgres "do $$
+psql_c postgres "do \$\$
 begin
   if exists (select 1 from pg_database where datname='${CONTROL_DB}') then
     perform dblink_connect('ctl', format('host=%s port=%s dbname=%s user=%s password=%s', '${DB_HOST}','${DB_PORT}','${CONTROL_DB}','${DB_USER}','${DB_PASS}'));
-    perform dblink_exec('ctl', $$ delete from index_pilot.maintenance_windows $$);
+    perform dblink_exec('ctl', \$db\$ delete from index_pilot.maintenance_windows \$db\$);
     perform dblink_disconnect('ctl');
   end if;
 exception when others then
   null;
 end
-$$;"
+\$\$;"
 
 echo "[cleanup] Dropping control and target databases"
 psql_c postgres "drop database if exists ${CONTROL_DB};"

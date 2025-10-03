@@ -39,10 +39,10 @@ psql_f() {
 echo "[windows] Using pre-installed control/target DBs from setup"
 
 echo "[windows] Create big table (1,000,000 rows), index, and induce bloat"
-psql_c "${CONTROL_DB}" "do $$
+psql_c "${CONTROL_DB}" "do \$\$
 begin
   perform index_pilot._connect_securely('${TARGET_DB}'::name);
-  perform dblink_exec('${TARGET_DB}', $$
+  perform dblink_exec('${TARGET_DB}', \$db\$
     create schema if not exists e2e;
     drop table if exists e2e.win_table cascade;
     create table e2e.win_table(id bigserial primary key, v int);
@@ -50,23 +50,23 @@ begin
     select (g % 100) from generate_series(1,1000000) as g;
     create index win_idx on e2e.win_table(v);
     analyze e2e.win_table;
-  $$);
+  \$db\$);
 end
-$$;"
+\$\$;"
 
 # Snapshot before bloat to establish baseline best_ratio
 psql_c "${CONTROL_DB}" "call index_pilot.periodic(false);"
 
 # Induce bloat: delete ~50% of rows
-psql_c "${CONTROL_DB}" "do $$
+psql_c "${CONTROL_DB}" "do \$\$
 begin
   perform index_pilot._connect_securely('${TARGET_DB}'::name);
-  perform dblink_exec('${TARGET_DB}', $$
+  perform dblink_exec('${TARGET_DB}', \$db\$
     delete from e2e.win_table where id % 2 = 0;
     analyze e2e.win_table;
-  $$);
+  \$db\$);
 end
-$$;"
+\$\$;"
 
 # Update snapshot after bloat so candidate appears with estimated_bloat > 1
 psql_c "${CONTROL_DB}" "call index_pilot.periodic(false);"
