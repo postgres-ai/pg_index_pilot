@@ -95,6 +95,86 @@ language plpgsql;
 
 
 /*
+ * Check if current time is inside a configured maintenance window for a database
+ */
+create function index_pilot._is_in_maintenance_window(
+  _datname name
+) returns boolean as
+$body$
+declare
+  _dow int;
+  _now time;
+  _exists boolean;
+begin
+  select extract(dow from clock_timestamp())::int, (clock_timestamp())::time into _dow, _now;
+  select exists (
+    select 1 from index_pilot.maintenance_windows
+    where database_name = _datname
+      and enabled
+      and day_of_week = _dow
+      and (
+        (start_time <= end_time and _now between start_time and end_time)
+        or (start_time > end_time and (_now >= start_time or _now <= end_time))
+      )
+  ) into _exists;
+  return _exists;
+exception when undefined_table then
+  return false;
+end;
+$body$
+language plpgsql stable;
+
+
+/*
+ * Get current window end timestamp for a database (null if not in window)
+ */
+create function index_pilot._get_current_window_end(
+  _datname name
+) returns timestamptz as
+$body$
+declare
+  _dow int;
+  _now_ts timestamptz := clock_timestamp();
+  _now time := (clock_timestamp())::time;
+  _end time;
+  _priority int;
+  _end_ts timestamptz;
+begin
+  select extract(dow from _now_ts)::int into _dow;
+
+  -- pick highest priority (smallest number) matching window; if multiple wrap-around windows exist, prefer earliest end
+  select end_time, priority
+  into _end, _priority
+  from index_pilot.maintenance_windows
+  where database_name = _datname
+    and enabled
+    and day_of_week = _dow
+    and (
+      (start_time <= end_time and _now between start_time and end_time)
+      or (start_time > end_time and (_now >= start_time or _now <= end_time))
+    )
+  order by priority asc, end_time asc
+  limit 1;
+
+  if not found then
+    return null;
+  end if;
+
+  -- compute absolute end timestamp; if window wraps and end_time < start_time and now < start_time, end is today; if now >= start_time and end < start, end is next day
+  if _end >= _now then
+    _end_ts := date_trunc('day', _now_ts) + _end;
+  else
+    _end_ts := date_trunc('day', _now_ts) + interval '1 day' + _end;
+  end if;
+
+  return _end_ts;
+exception when undefined_table then
+  return null;
+end;
+$body$
+language plpgsql stable;
+
+/*
  * Installation-time safety validation
  * Blocks unsafe deployments: enforces PG13+ requirement and detects known bugs
  */
@@ -1013,7 +1093,8 @@ create procedure index_pilot.do_reindex(
   _schemaname name,
   _relname name,
   _indexrelname name,
-  _force boolean default false
+  _force boolean default false,
+  _deadline timestamptz default null
 ) as
 $body$
 declare
@@ -1039,7 +1120,14 @@ begin
     commit; -- Commit after connection to minimize risk of locking issues
   end if;
   for _index in
-    select datname, schemaname, relname, indexrelname, indexsize, estimated_bloat
+    select 
+      datname, 
+      schemaname, 
+      relname, 
+      indexrelname, 
+      indexsize, 
+      estimated_bloat,
+      index_pilot.estimate_reindex_duration(datname, schemaname, relname, indexrelname, indexsize) as estimated_duration
     -- index_size_threshold check logic is now handled inside get_index_bloat_estimates
     -- The force option causes index_rebuild_scale_factor to be ignored, reindexing all eligible indexes
     -- Indexes that are too small (below index_size_threshold) or explicitly set to skip in the config are always ignored, even with force enabled
@@ -1062,7 +1150,26 @@ begin
           )
         )
       )
+    order by
+      estimated_duration asc nulls last,
+      estimated_bloat desc nulls last
     loop
+      -- Early-stop planning: if deadline is set and the next (shortest) job cannot finish in time, stop the loop
+      if _deadline is not null then
+        if _index.estimated_duration is null then
+          exit; -- unknown duration => do not risk; subsequent ones are longer/unknown
+        end if;
+        if not index_pilot._can_complete_before_deadline(
+          _index.datname,
+          _index.schemaname,
+          _index.relname,
+          _index.indexrelname,
+          _deadline,
+          _index.indexsize
+        ) then
+          exit; -- cannot finish before deadline; further items won't either (shortest-first ordering)
+        end if;
+      end if;
       -- Record what we're working on
       insert into index_pilot.current_processed_index(
         datname,
@@ -1349,7 +1456,8 @@ language plpgsql;
  */
 create or replace procedure index_pilot.periodic(
   real_run boolean default false,
-  force boolean default false
+  force boolean default false,
+  window_duration interval default null
 ) as
 $body$
 declare
@@ -1367,6 +1475,20 @@ begin
 
   -- Check if the table structure is up to date
   perform index_pilot.check_update_structure_version();
+
+  -- Determine deadline from maintenance windows if not provided via window_duration
+  declare
+    _deadline_override timestamptz;
+  begin
+    if window_duration is null then
+      -- Attempt to compute current window end based on maintenance_windows
+      begin
+        _deadline_override := index_pilot._get_current_window_end(current_database());
+      exception when undefined_function then
+        _deadline_override := null; -- helper not yet defined
+      end;
+    end if;
+  end;
 
   -- Check if we're in control database mode
   if exists (select from pg_tables where schemaname = 'index_pilot' and tablename = 'target_databases') then
@@ -1388,7 +1510,22 @@ begin
       perform index_pilot._record_indexes_info(_datname, null, null, null);
           
       if real_run then
-        call index_pilot.do_reindex(_datname, null, null, null, force);
+        -- choose deadline: from window_duration param or computed from maintenance_windows
+        declare
+          _deadline timestamptz := case 
+            when window_duration is not null then clock_timestamp() + window_duration
+            else _deadline_override
+          end;
+        begin
+        call index_pilot.do_reindex(
+          _datname, 
+          null, 
+          null, 
+          null, 
+          force,
+          _deadline
+        );
+        end;
         -- refresh snapshot right after reindex to clamp baseline with current ratio
         perform index_pilot._record_indexes_info(_datname, null, null, null);
       end if;
@@ -1463,6 +1600,133 @@ begin
         and pg_has_role(c.relowner, 'usage')
       limit 1
     );
+end;
+$body$
+language plpgsql;
+
+
+/*
+ * Estimate reindex duration based on historical data and heuristics
+ * Returns predicted duration for reindexing operation with safety margin
+ */
+create function index_pilot.estimate_reindex_duration(
+  _datname name,
+  _schemaname name,
+  _relname name,
+  _indexrelname name,
+  _current_size bigint default null
+) returns interval as
+$body$
+declare
+  _historical_estimate interval;
+  _avg_duration interval;
+  _avg_size bigint;
+  _size_ratio numeric;
+  _history_count integer;
+  _safety_factor numeric := 1.3;  -- 30% safety margin
+  _heuristic_rate numeric;  -- MiB per second
+  _estimated_size bigint;
+begin
+  -- Get current index size if not provided
+  if _current_size is null then
+    select indexsize into _estimated_size
+    from index_pilot.index_latest_state
+    where
+      datname = _datname
+      and schemaname = _schemaname
+      and relname = _relname
+      and indexrelname = _indexrelname
+    limit 1;
+    
+    _current_size := coalesce(_estimated_size, 0);
+  end if;
+  
+  if _current_size = 0 then
+    return null;
+  end if;
+  
+  -- Attempt historical estimation based on past successful reindexes
+  select
+    count(*),
+    avg(extract(epoch from reindex_duration)),
+    avg(indexsize_before)
+  into
+    _history_count,
+    _avg_duration,
+    _avg_size
+  from index_pilot.reindex_history
+  where
+    datname = _datname
+    and schemaname = _schemaname
+    and relname = _relname
+    and indexrelname = _indexrelname
+    and entry_timestamp > now() - interval '90 days'
+    and status = 'completed'
+    and reindex_duration is not null
+    and indexsize_before > 0;
+  
+  -- If we have any historical data (>=1) for this index in the last 90 days
+  if _history_count >= 1 and _avg_duration is not null and _avg_size > 0 then
+    -- Calculate size ratio between current and historical average
+    _size_ratio := _current_size::numeric / _avg_size::numeric;
+    
+    -- Estimate based on historical average, adjusted for size difference
+    _historical_estimate := make_interval(secs => (_avg_duration * _size_ratio * _safety_factor));
+    
+    return _historical_estimate;
+  end if;
+  
+  -- No reliable data available for this index - return null
+  -- Caller should decide how to handle (e.g., first run must happen to seed history)
+  return null;
+end;
+$body$
+language plpgsql;
+
+
+/*
+ * Check if reindex can complete before specified deadline
+ * Returns true if estimated completion time is before deadline with safety buffer
+ */
+create function index_pilot._can_complete_before_deadline(
+  _datname name,
+  _schemaname name,
+  _relname name,
+  _indexrelname name,
+  _deadline timestamptz,
+  _current_size bigint default null
+) returns boolean as
+$body$
+declare
+  _estimated_duration interval;
+  _estimated_completion timestamptz;
+  _time_buffer_pct numeric;
+  _time_buffer interval;
+begin
+  -- Get time buffer percentage from config (default 20%)
+  _time_buffer_pct := coalesce(
+    index_pilot.get_setting(_datname, _schemaname, _relname, _indexrelname, 'safety_time_buffer_pct')::numeric,
+    20.0
+  );
+  
+  -- Get estimated duration
+  _estimated_duration := index_pilot.estimate_reindex_duration(
+    _datname, _schemaname, _relname, _indexrelname, _current_size
+  );
+  
+  -- If we can't estimate, be conservative and return false
+  if _estimated_duration is null then
+    return false;
+  end if;
+  
+  -- Calculate additional time buffer
+  _time_buffer := _estimated_duration * (_time_buffer_pct / 100.0);
+  
+  -- Calculate estimated completion time
+  _estimated_completion := clock_timestamp() + _estimated_duration + _time_buffer;
+  
+  -- Return true if we can complete before deadline
+  return _estimated_completion <= _deadline;
 end;
 $body$
 language plpgsql;

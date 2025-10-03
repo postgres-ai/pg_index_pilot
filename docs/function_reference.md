@@ -4,6 +4,7 @@
 
 - [Core Functions](#core-functions)
 - [Bloat Analysis](#bloat-analysis)
+- [Smart Scheduling](#smart-scheduling)
 - [Non-Superuser Mode Functions](#non-superuser-mode-functions)
 - [Configuration](#configuration)
 - [FDW and connection setup](#fdw-and-connection-setup)
@@ -51,6 +52,78 @@ returns table(
 Notes:
 - `estimated_bloat` is computed as `indexsize / (best_ratio * estimated_tuples)` using cached state in `index_pilot.index_current_state`.
 - Immediately after baseline initialization (see `do_force_populate_index_stats`) `estimated_bloat` will be ~1.0 by definition; it grows as indexes bloat further.
+
+### Smart Scheduling
+
+#### `index_pilot.estimate_reindex_duration()`
+Estimates how long a reindex operation will take based on historical data and heuristics.
+```sql
+function index_pilot.estimate_reindex_duration(
+    _datname name,
+    _schemaname name,
+    _relname name,
+    _indexrelname name,
+    _current_size bigint default null
+) returns interval
+```
+
+Notes:
+- Uses historical data from `reindex_history` (last 90 days) if at least 2 successful reindexes exist
+- Falls back to conservative heuristic estimation (50 MiB/sec baseline)
+- Accounts for `max_parallel_maintenance_workers` setting
+- Includes 30% safety margin by default
+- Returns null for zero-size indexes
+
+Example:
+```sql
+-- Estimate duration for specific index
+select 
+  indexrelname,
+  pg_size_pretty(indexsize) as size,
+  index_pilot.estimate_reindex_duration(
+    datname, schemaname, relname, indexrelname, indexsize
+  ) as estimated_duration
+from index_pilot.index_latest_state
+where indexrelname = 'users_email_idx';
+```
+
+#### `index_pilot._can_complete_before_deadline()`
+Checks if a reindex operation can complete before a specified deadline.
+```sql
+function index_pilot._can_complete_before_deadline(
+    _datname name,
+    _schemaname name,
+    _relname name,
+    _indexrelname name,
+    _deadline timestamptz,
+    _current_size bigint default null
+) returns boolean
+```
+
+Notes:
+- Uses `estimate_reindex_duration()` internally
+- Adds configurable safety time buffer (default 20%, see `safety_time_buffer_pct` config)
+- Returns false if duration cannot be estimated
+- Compares estimated completion time against deadline
+
+Example:
+```sql
+-- Check which indexes can complete in next 2 hours
+select 
+  schemaname,
+  indexrelname,
+  pg_size_pretty(indexsize) as size,
+  index_pilot._can_complete_before_deadline(
+    datname, schemaname, relname, indexrelname,
+    clock_timestamp() + interval '2 hours',
+    indexsize
+  ) as can_complete
+from index_pilot.index_latest_state
+where datname = 'mydb'
+order by indexsize desc;
+```
+
+See [Smart Scheduling documentation](smart_scheduling.md) for detailed usage examples and configuration options.
 
 ### Non-Superuser Mode Functions
 

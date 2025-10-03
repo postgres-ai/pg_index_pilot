@@ -73,6 +73,10 @@ insert into index_pilot.config (
   'reindex_history_retention_period',
   '10 years',
   'default retention period for reindex history'
+), (
+  'safety_time_buffer_pct',
+  '20',
+  'additional time buffer percentage for scheduling decisions (default 20%)'
 );
 
 -- Default database-level setting
@@ -215,5 +219,25 @@ create table index_pilot.current_processed_index (
   relname name not null,
   indexrelname name not null
 );
+
+--
+-- Maintenance windows
+-- Defines allowed time windows for maintenance per database
+-- day_of_week: 0=sunday .. 6=saturday; use multiple rows for multiple days
+-- start_time/end_time in database timezone
+-- priority: smaller number means higher priority when overlapping
+--
+create table index_pilot.maintenance_windows (
+  id bigserial primary key,
+  database_name name not null,
+  day_of_week smallint not null check (day_of_week between 0 and 6),
+  start_time time not null,
+  end_time time not null,
+  priority integer not null default 100,
+  enabled boolean not null default true,
+  notes text
+);
+
+create index maintenance_windows_db_day_idx on index_pilot.maintenance_windows(database_name, day_of_week, enabled);
 
 commit;
