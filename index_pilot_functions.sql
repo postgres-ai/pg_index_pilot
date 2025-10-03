@@ -1466,7 +1466,6 @@ declare
   _relname name;
   _indexrelname name;
   _id bigint;
-  _deadline_override timestamptz;
 begin
   -- Validate PostgreSQL version safety
   perform index_pilot._validate_pg_version();
@@ -1477,10 +1476,7 @@ begin
   -- Check if the table structure is up to date
   perform index_pilot.check_update_structure_version();
 
-  -- Determine deadline from maintenance windows if not provided via window_duration
-  if window_duration is null then
-    _deadline_override := index_pilot._get_current_window_end(current_database());
-  end if;
+  -- No global deadline precomputed; per-database deadline computed inside the loop
 
   -- Check if we're in control database mode
   if exists (select from pg_tables where schemaname = 'index_pilot' and tablename = 'target_databases') then
@@ -1502,11 +1498,11 @@ begin
       perform index_pilot._record_indexes_info(_datname, null, null, null);
           
       if real_run then
-        -- choose deadline: from window_duration param or computed from maintenance_windows
+        -- Compute per-database deadline: param window_duration or maintenance_windows of target database
         declare
           _deadline timestamptz := case 
             when window_duration is not null then clock_timestamp() + window_duration
-            else _deadline_override
+            else index_pilot._get_current_window_end(_datname)
           end;
         begin
         call index_pilot.do_reindex(
