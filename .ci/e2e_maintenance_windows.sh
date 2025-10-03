@@ -9,7 +9,7 @@ exec > >(tee -a e2e_windows.log) 2>&1
 export PAGER=cat
 DB_HOST="${DB_HOST:-postgres}"
 DB_PORT="${DB_PORT:-5432}"
-DB_NAME="${DB_NAME:-test_index_pilot}"  # base name used across e2e
+DB_NAME="${DB_NAME:-test_index_pilot}" # base name used across e2e
 DB_USER="${POSTGRES_USER:-${DB_USER:-postgres}}"
 DB_PASS="${POSTGRES_PASSWORD:-${DB_PASS:-postgres}}"
 
