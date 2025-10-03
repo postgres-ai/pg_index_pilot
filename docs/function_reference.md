@@ -20,7 +20,8 @@ procedure index_pilot.do_reindex(
     _schemaname name, 
     _relname name, 
     _indexrelname name, 
-    _force boolean default false  -- Force reindex regardless of bloat
+    _force boolean default false,           -- Force reindex regardless of bloat
+    _deadline timestamptz default null      -- Stop scheduling new items when approaching deadline
 )
 ```
 
@@ -28,10 +29,13 @@ procedure index_pilot.do_reindex(
 Main procedure for automated bloat detection and reindexing.
 ```sql
 procedure index_pilot.periodic(
-    real_run boolean default false,  -- Execute actual reindexing
-    force boolean default false      -- Force all eligible indexes
+    real_run boolean default false,          -- Execute actual reindexing
+    force boolean default false,             -- Force all eligible indexes
+    window_duration interval default null    -- Optional: compute deadline as now() + duration; if null, uses maintenance_windows
 )
 ```
+Notes:
+- If `window_duration` is null and `index_pilot.maintenance_windows` contains an active window for the control DB, a deadline is derived from `_get_current_window_end()` and passed into `do_reindex()` to enable early stop.
 
 ### Bloat Analysis
 
@@ -56,7 +60,7 @@ Notes:
 ### Smart Scheduling
 
 #### `index_pilot.estimate_reindex_duration()`
-Estimates how long a reindex operation will take based on historical data and heuristics.
+Estimates how long a reindex operation will take based on historical data for the specific index.
 ```sql
 function index_pilot.estimate_reindex_duration(
     _datname name,
@@ -68,11 +72,9 @@ function index_pilot.estimate_reindex_duration(
 ```
 
 Notes:
-- Uses historical data from `reindex_history` (last 90 days) if at least 2 successful reindexes exist
-- Falls back to conservative heuristic estimation (50 MiB/sec baseline)
-- Accounts for `max_parallel_maintenance_workers` setting
-- Includes 30% safety margin by default
-- Returns null for zero-size indexes
+- Uses historical data from `reindex_history` (last 90 days) if at least 1 successful reindex exists for this index
+- Scales historical duration by current index size and applies 30% safety margin
+- Returns null when there is no history for this index or when current size is zero
 
 Example:
 ```sql
@@ -123,7 +125,7 @@ where datname = 'mydb'
 order by indexsize desc;
 ```
 
-See [Smart Scheduling documentation](smart_scheduling.md) for detailed usage examples and configuration options.
+Smart scheduling: `periodic()` orders candidates by shortest estimated duration first and stops early when the computed deadline is reached.
 
 ### Non-Superuser Mode Functions
 
@@ -216,6 +218,22 @@ returns table(component text, status text, details text)
 ```
 
 ### Maintenance helpers and meta
+
+#### `index_pilot._is_in_maintenance_window()`
+Checks whether the current time falls into a configured maintenance window for the given database.
+```sql
+function index_pilot._is_in_maintenance_window(
+  _datname name
+) returns boolean
+```
+
+#### `index_pilot._get_current_window_end()`
+Returns the end timestamp of the current maintenance window for the given database, or null if not in a window.
+```sql
+function index_pilot._get_current_window_end(
+  _datname name
+) returns timestamptz
+```
 
 #### `index_pilot.do_force_populate_index_stats()`
 Initializes baseline using current sizes/tuples without reindex.
