@@ -45,5 +45,3 @@ psql_c postgres "drop database if exists ${CONTROL_DB};"
 psql_c postgres "drop database if exists ${TARGET_DB};"
 
 echo "[cleanup] Done"
-
-

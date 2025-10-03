@@ -76,5 +76,3 @@ echo "[setup] Testing secure FDW connectivity"
 psql_c "${CONTROL_DB}" "select index_pilot._connect_securely('${TARGET_DB}'::name);"
 
 echo "[setup] Done"
-
-

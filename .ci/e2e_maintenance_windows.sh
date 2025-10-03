@@ -83,5 +83,3 @@ if [[ "${COUNT_AFTER}" != "${COUNT_BEFORE}" ]]; then
 fi
 
 echo "[windows] Maintenance windows gating — PASS"
-
-

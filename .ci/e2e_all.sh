@@ -30,5 +30,3 @@ echo "[all] Step 5: final cleanup"
 ./ci/e2e_cleanup.sh
 
 echo "[all] E2E suite completed"
-
-
