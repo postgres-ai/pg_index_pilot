@@ -38,26 +38,37 @@ psql_f() {
 
 echo "[windows] Using pre-installed control/target DBs from setup"
 
-echo "Create small table and index to have candidates"
+echo "[windows] Create big table (1,000,000 rows), index, and induce bloat"
 psql_c "${CONTROL_DB}" "do $$
 begin
   perform index_pilot._connect_securely('${TARGET_DB}'::name);
   perform dblink_exec('${TARGET_DB}', $$
     create schema if not exists e2e;
     drop table if exists e2e.win_table cascade;
-    create table e2e.win_table(id serial primary key, v text);
-    insert into e2e.win_table(v) select 'x' from generate_series(1,10000);
+    create table e2e.win_table(id bigserial primary key, v int);
+    insert into e2e.win_table(v)
+    select (g % 100) from generate_series(1,1000000) as g;
     create index win_idx on e2e.win_table(v);
     analyze e2e.win_table;
   $$);
 end
 $$;"
 
-echo "[windows] Lower thresholds to ensure candidacy"
-psql_c "${CONTROL_DB}" "select index_pilot.set_or_replace_setting('${TARGET_DB}', null, null, null, 'index_size_threshold', '0', 'windows test');"
-psql_c "${CONTROL_DB}" "select index_pilot.set_or_replace_setting('${TARGET_DB}', null, null, null, 'index_rebuild_scale_factor', '1.01', 'windows test');"
+# Snapshot before bloat to establish baseline best_ratio
+psql_c "${CONTROL_DB}" "call index_pilot.periodic(false);"
 
-echo "[windows] Initialize snapshot"
+# Induce bloat: delete ~50% of rows
+psql_c "${CONTROL_DB}" "do $$
+begin
+  perform index_pilot._connect_securely('${TARGET_DB}'::name);
+  perform dblink_exec('${TARGET_DB}', $$
+    delete from e2e.win_table where id % 2 = 0;
+    analyze e2e.win_table;
+  $$);
+end
+$$;"
+
+# Update snapshot after bloat so candidate appears with estimated_bloat > 1
 psql_c "${CONTROL_DB}" "call index_pilot.periodic(false);"
 
 echo "[windows] Configure short active window (now -> now+15s)"
