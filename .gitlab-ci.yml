@@ -364,7 +364,7 @@ e2e:bloat-reduction:
       alias: postgres
   before_script:
     - apk add --no-cache bash coreutils
-    - chmod +x ci/e2e_bloat_reduction.sh
+    - chmod +x ci/e2e_all.sh ci/e2e_setup.sh ci/e2e_bloat_reduction.sh ci/e2e_maintenance_windows.sh ci/e2e_cleanup.sh
   script:
-    - ./ci/e2e_bloat_reduction.sh
+    - ./ci/e2e_all.sh
   timeout: 1h
