@@ -355,8 +355,8 @@ quality:sql:
     - docker
   allow_failure: true
 
-# End-to-end bloat reduction test
-e2e:bloat-reduction:
+# End-to-end test
+e2e:
   stage: test
   image: postgres:17-alpine
   services:
