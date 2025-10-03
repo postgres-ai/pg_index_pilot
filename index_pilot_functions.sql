@@ -1157,7 +1157,7 @@ begin
       -- Early-stop planning: if deadline is set and the next (shortest) job cannot finish in time, stop the loop
       if _deadline is not null then
         if _index.estimated_duration is null then
-          exit; -- unknown duration => do not risk; subsequent ones are longer/unknown
+          continue; -- skip unknown-duration items within a window; process known ones first
         end if;
         if not index_pilot._can_complete_before_deadline(
           _index.datname,
