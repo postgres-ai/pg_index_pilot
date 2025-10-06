@@ -77,11 +77,11 @@ begin
   raise notice 'Initial index sizes:';
   for _rec in 
     select * from dblink('${TARGET_DB}', \$db\$
-      select indexrelname, pg_size_pretty(pg_relation_size(schemaname||'.'||indexrelname)) as size
-      from pg_indexes where schemaname = 'e2e' order by indexrelname
-    \$db\$) as t(indexrelname name, size text)
+      select indexname, pg_size_pretty(pg_relation_size(schemaname||'.'||indexname)) as size
+      from pg_indexes where schemaname = 'e2e' order by indexname
+    \$db\$) as t(indexname name, size text)
   loop
-    raise notice '  %: %', _rec.indexrelname, _rec.size;
+    raise notice '  %: %', _rec.indexname, _rec.size;
   end loop;
 end
 \$\$;"
@@ -108,11 +108,11 @@ begin
   raise notice 'Index sizes after bloat:';
   for _rec in 
     select * from dblink('${TARGET_DB}', \$db\$
-      select indexrelname, pg_size_pretty(pg_relation_size(schemaname||'.'||indexrelname)) as size
-      from pg_indexes where schemaname = 'e2e' order by indexrelname
-    \$db\$) as t(indexrelname name, size text)
+      select indexname, pg_size_pretty(pg_relation_size(schemaname||'.'||indexname)) as size
+      from pg_indexes where schemaname = 'e2e' order by indexname
+    \$db\$) as t(indexname name, size text)
   loop
-    raise notice '  %: %', _rec.indexrelname, _rec.size;
+    raise notice '  %: %', _rec.indexname, _rec.size;
   end loop;
 end
 \$\$;"
