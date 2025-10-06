@@ -60,16 +60,33 @@ begin
     create table e2e.small_table_2(id bigserial primary key, data text);
     insert into e2e.small_table_2(data) select repeat('z', 50) from generate_series(1, 50000);
     create index small_idx_2 on e2e.small_table_2(data);
-    
-    analyze e2e.large_table, e2e.small_table_1, e2e.small_table_2;
   \$db\$);
 end
 \$\$;"
 
-# Snapshot before bloat
+echo "[windows] Snapshot before bloat"
 psql_c "${CONTROL_DB}" "call index_pilot.periodic(false);"
 
-echo "[windows] Induce bloat in all tables"
+echo "[windows] Show initial index sizes"
+psql_c "${CONTROL_DB}" "
+do \$\$
+declare
+  _rec record;
+begin
+  perform index_pilot._connect_securely('${TARGET_DB}'::name);
+  raise notice 'Initial index sizes:';
+  for _rec in 
+    select * from dblink('${TARGET_DB}', \$db\$
+      select indexrelname, pg_size_pretty(pg_relation_size(schemaname||'.'||indexrelname)) as size
+      from pg_indexes where schemaname = 'e2e' order by indexrelname
+    \$db\$) as t(indexrelname name, size text)
+  loop
+    raise notice '  %: %', _rec.indexrelname, _rec.size;
+  end loop;
+end
+\$\$;"
+
+echo "[windows] Induce bloat in all tables (no analyze)"
 psql_c "${CONTROL_DB}" "do \$\$
 begin
   perform index_pilot._connect_securely('${TARGET_DB}'::name);
@@ -77,12 +94,30 @@ begin
     delete from e2e.large_table where id % 2 = 0;
     delete from e2e.small_table_1 where id % 2 = 0;
     delete from e2e.small_table_2 where id % 2 = 0;
-    analyze e2e.large_table, e2e.small_table_1, e2e.small_table_2;
   \$db\$);
 end
 \$\$;"
 
-# Update snapshot after bloat
+echo "[windows] Show index sizes after bloat"
+psql_c "${CONTROL_DB}" "
+do \$\$
+declare
+  _rec record;
+begin
+  perform index_pilot._connect_securely('${TARGET_DB}'::name);
+  raise notice 'Index sizes after bloat:';
+  for _rec in 
+    select * from dblink('${TARGET_DB}', \$db\$
+      select indexrelname, pg_size_pretty(pg_relation_size(schemaname||'.'||indexrelname)) as size
+      from pg_indexes where schemaname = 'e2e' order by indexrelname
+    \$db\$) as t(indexrelname name, size text)
+  loop
+    raise notice '  %: %', _rec.indexrelname, _rec.size;
+  end loop;
+end
+\$\$;"
+
+echo "[windows] Update snapshot after bloat"
 psql_c "${CONTROL_DB}" "call index_pilot.periodic(false);"
 
 echo "[windows] TEST 1: First pass without windows - collect statistics"
@@ -120,6 +155,17 @@ if ! grep -q "Skipping database ${TARGET_DB}" /tmp/skip_test.log; then
 fi
 
 echo "[windows] TEST 3: Short window (3 seconds) - only fast indexes should complete"
+
+echo "[windows] Show current index sizes and bloat ratios"
+psql_c "${CONTROL_DB}" "
+select 
+  ils.indexrelname,
+  pg_size_pretty(ils.indexsize) as current_size,
+  coalesce(ils.best_ratio::numeric(10,2), 1.0) as best_ratio
+from index_pilot.index_latest_state ils
+where ils.datname = '${TARGET_DB}' and ils.schemaname = 'e2e'
+order by ils.indexsize desc;"
+
 psql_c "${CONTROL_DB}" "delete from index_pilot.maintenance_windows where database_name='${TARGET_DB}';"
 psql_c "${CONTROL_DB}" "insert into index_pilot.maintenance_windows(database_name, day_of_week, start_time, end_time, enabled)
 select '${TARGET_DB}', extract(dow from clock_timestamp())::int,
