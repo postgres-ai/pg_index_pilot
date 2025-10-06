@@ -1481,11 +1481,20 @@ begin
   -- Check if we're in control database mode
   if exists (select from pg_tables where schemaname = 'index_pilot' and tablename = 'target_databases') then
     -- Control database mode: process all enabled target databases
-    for _datname in 
-      select database_name
-      from index_pilot.target_databases
-      where enabled
+    -- Check once which databases have maintenance windows configured
+    declare
+      _db_record record;
+    begin
+    for _db_record in 
+      select 
+        td.database_name,
+        coalesce(bool_or(mw.enabled), false) as has_windows
+      from index_pilot.target_databases td
+      left join index_pilot.maintenance_windows mw on mw.database_name = td.database_name
+      where td.enabled
+      group by td.database_name
     loop
+      _datname := _db_record.database_name;
       -- Clean old history for this database
       delete from index_pilot.reindex_history
       where datname = _datname
@@ -1505,21 +1514,34 @@ begin
             else index_pilot._get_current_window_end(_datname)
           end;
         begin
-        call index_pilot.do_reindex(
-          _datname, 
-          null, 
-          null, 
-          null, 
-          force,
-          _deadline
-        );
+          -- Skip database if ALL three conditions are met:
+          -- 1. window_duration is null (no explicit override via parameter)
+          --    AND
+          -- 2. _deadline is null (no active maintenance window right now)
+          --    AND
+          -- 3. has_windows is true (maintenance windows ARE configured for this database)
+          --
+          -- Result: databases with configured windows only run INSIDE those windows
+          -- Databases WITHOUT configured windows (has_windows=false) run anytime
+          if window_duration is null and _deadline is null and _db_record.has_windows then
+            raise notice 'Skipping database % - maintenance windows configured but no active window', _datname;
+            continue;
+          end if;
+          
+          call index_pilot.do_reindex(
+            _datname, 
+            null, 
+            null, 
+            null, 
+            force,
+            _deadline
+          );
         end;
         -- refresh snapshot right after reindex to clamp baseline with current ratio
         perform index_pilot._record_indexes_info(_datname, null, null, null);
       end if;
     end loop;
-        
-    -- Note: No need to update completed reindexes - all tracking is synchronous now
+    end;
         
     -- Clean up any invalid _ccnew indexes from failed reindexes
     call index_pilot._cleanup_our_not_valid_indexes();
