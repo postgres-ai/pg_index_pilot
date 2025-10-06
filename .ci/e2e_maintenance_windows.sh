@@ -19,21 +19,21 @@ TARGET_DB="${DB_NAME}"
 export PGPASSWORD="${DB_PASS:-${POSTGRES_PASSWORD:-postgres}}"
 
 psql_base() {
-	psql --no-psqlrc -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" "$@"
+  psql --no-psqlrc -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" "$@"
 }
 
 psql_c() {
-	local db="$1"
-	shift
-	psql_base -d "${db}" -v ON_ERROR_STOP=on -At -c "$*"
+  local db="$1"
+  shift
+  psql_base -d "${db}" -v ON_ERROR_STOP=on -At -c "$*"
 }
 
 psql_f() {
-	local db="$1"
-	shift
-	local file="$1"
-	shift
-	psql_base -d "${db}" -v ON_ERROR_STOP=on -f "${file}" "$@"
+  local db="$1"
+  shift
+  local file="$1"
+  shift
+  psql_base -d "${db}" -v ON_ERROR_STOP=on -f "${file}" "$@"
 }
 
 echo "[windows] Using pre-installed control/target DBs from setup"
@@ -92,8 +92,8 @@ COUNT_PASS1=$(psql_c "${CONTROL_DB}" "select count(*) from index_pilot.reindex_h
 echo "[windows] Pass 1 completed: ${COUNT_PASS1} indexes (expected 6: 3 pkeys + 3 data indexes)"
 
 if [[ "${COUNT_PASS1}" -lt 6 ]]; then
-	echo "[windows] FAIL: Pass 1 should reindex all 6 indexes" >&2
-	exit 1
+  echo "[windows] FAIL: Pass 1 should reindex all 6 indexes" >&2
+  exit 1
 fi
 
 echo "[windows] TEST 2: Run outside active window - should skip database"
@@ -110,13 +110,13 @@ psql_c "${CONTROL_DB}" "call index_pilot.periodic(true, true);" 2>&1 | tee /tmp/
 COUNT_AFTER_SKIP=$(psql_c "${CONTROL_DB}" "select count(*) from index_pilot.reindex_history where datname='${TARGET_DB}' and status='completed';")
 
 if [[ "${COUNT_AFTER_SKIP}" != "${COUNT_BEFORE_SKIP}" ]]; then
-	echo "[windows] FAIL: Should skip database outside window (before=${COUNT_BEFORE_SKIP}, after=${COUNT_AFTER_SKIP})" >&2
-	exit 1
+  echo "[windows] FAIL: Should skip database outside window (before=${COUNT_BEFORE_SKIP}, after=${COUNT_AFTER_SKIP})" >&2
+  exit 1
 fi
 
 if ! grep -q "Skipping database ${TARGET_DB}" /tmp/skip_test.log; then
-	echo "[windows] FAIL: Expected 'Skipping database' notice" >&2
-	exit 1
+  echo "[windows] FAIL: Expected 'Skipping database' notice" >&2
+  exit 1
 fi
 
 echo "[windows] TEST 3: Short window (3 seconds) - only fast indexes should complete"
@@ -142,13 +142,13 @@ LARGE_COUNT=$(psql_c "${CONTROL_DB}" "select count(*) from index_pilot.reindex_h
   and entry_timestamp > clock_timestamp() - interval '1 minute';")
 
 if [[ "${LARGE_COUNT}" -gt 0 ]]; then
-	echo "[windows] FAIL: Large table should not be reindexed in 3-second window" >&2
-	exit 1
+  echo "[windows] FAIL: Large table should not be reindexed in 3-second window" >&2
+  exit 1
 fi
 
 if [[ "${REINDEXED_IN_WINDOW}" -lt 2 ]]; then
-	echo "[windows] FAIL: At least 2 small indexes should complete in 3-second window" >&2
-	exit 1
+  echo "[windows] FAIL: At least 2 small indexes should complete in 3-second window" >&2
+  exit 1
 fi
 
 echo "[windows] Maintenance windows smart scheduling — ALL TESTS PASS"
