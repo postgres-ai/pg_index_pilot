@@ -1607,7 +1607,7 @@ create function index_pilot.estimate_reindex_duration(
 $body$
 declare
   _historical_estimate interval;
-  _avg_duration interval;
+  _avg_duration_sec numeric;
   _avg_size bigint;
   _size_ratio numeric;
   _history_count integer;
@@ -1640,7 +1640,7 @@ begin
     avg(indexsize_before)
   into
     _history_count,
-    _avg_duration,
+    _avg_duration_sec,
     _avg_size
   from index_pilot.reindex_history
   where
@@ -1654,12 +1654,12 @@ begin
     and indexsize_before > 0;
   
   -- If we have any historical data (>=1) for this index in the last 90 days
-  if _history_count >= 1 and _avg_duration is not null and _avg_size > 0 then
+  if _history_count >= 1 and _avg_duration_sec is not null and _avg_size > 0 then
     -- Calculate size ratio between current and historical average
     _size_ratio := _current_size::numeric / _avg_size::numeric;
     
     -- Estimate based on historical average, adjusted for size difference
-    _historical_estimate := make_interval(secs => (_avg_duration * _size_ratio * _safety_factor));
+    _historical_estimate := make_interval(secs => (_avg_duration_sec * _size_ratio * _safety_factor));
     
     return _historical_estimate;
   end if;
