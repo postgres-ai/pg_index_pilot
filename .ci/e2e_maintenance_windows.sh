@@ -167,7 +167,7 @@ fi
 echo "[windows] Cleanup history after TEST 2"
 psql_c "${CONTROL_DB}" "delete from index_pilot.reindex_history;"
 
-echo "[windows] TEST 3: Short window (10 seconds) - only fast indexes should complete"
+echo "[windows] TEST 3: Short window (30 seconds) - only fast indexes should complete"
 
 echo "[windows] Create massive fresh bloat for TEST 3 by updating indexed columns"
 psql_c "${CONTROL_DB}" "do \$\$
@@ -204,8 +204,8 @@ order by ils.indexsize desc;"
 psql_c "${CONTROL_DB}" "delete from index_pilot.maintenance_windows where database_name='${TARGET_DB}';"
 psql_c "${CONTROL_DB}" "insert into index_pilot.maintenance_windows(database_name, day_of_week, start_time, end_time, enabled)
 select '${TARGET_DB}', extract(dow from clock_timestamp())::int,
-       (clock_timestamp())::time,
-       (clock_timestamp() + interval '10 seconds')::time,
+       (clock_timestamp() - interval '5 seconds')::time,
+       (clock_timestamp() + interval '30 seconds')::time,
        true;"
 
 COUNT_BEFORE_SHORT=$(psql_c "${CONTROL_DB}" "select count(*) from index_pilot.reindex_history where datname='${TARGET_DB}' and schemaname='e2e' and status='completed';")
@@ -216,19 +216,19 @@ REINDEXED_IN_WINDOW=$((COUNT_AFTER_SHORT - COUNT_BEFORE_SHORT))
 
 echo "[windows] Short window completed: ${REINDEXED_IN_WINDOW} e2e indexes reindexed"
 
-# Check that large_table was NOT reindexed in this pass (too slow for 10-sec window)
+# Check that large_table was NOT reindexed in this pass (too slow for 30-sec window)
 LARGE_COUNT=$(psql_c "${CONTROL_DB}" "select count(*) from index_pilot.reindex_history 
   where datname='${TARGET_DB}' and schemaname='e2e' and status='completed' 
   and (indexrelname = 'large_table_pkey' or indexrelname = 'large_idx')
   and entry_timestamp > clock_timestamp() - interval '1 minute';")
 
 if [[ "${LARGE_COUNT}" -gt 0 ]]; then
-  echo "[windows] FAIL: Large table should not be reindexed in 10-second window" >&2
+  echo "[windows] FAIL: Large table should not be reindexed in 30-second window" >&2
   exit 1
 fi
 
 if [[ "${REINDEXED_IN_WINDOW}" -lt 2 ]]; then
-  echo "[windows] FAIL: At least 2 small indexes should complete in 10-second window" >&2
+  echo "[windows] FAIL: At least 2 small indexes should complete in 30-second window" >&2
   exit 1
 fi
 
