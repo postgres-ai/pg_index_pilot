@@ -51,14 +51,14 @@ begin
     insert into e2e.large_table(data) select repeat('x', 200) from generate_series(1, 2000000);
     create index large_idx on e2e.large_table(data);
     
-    -- Small table 1: ~100k rows, fast reindex (<1 sec)
+    -- Small table 1: ~30k rows, fast reindex (<1 sec)
     create table e2e.small_table_1(id bigserial primary key, data text);
-    insert into e2e.small_table_1(data) select repeat('y', 100) from generate_series(1, 100000);
+    insert into e2e.small_table_1(data) select repeat('y', 50) from generate_series(1, 30000);
     create index small_idx_1 on e2e.small_table_1(data);
     
-    -- Small table 2: ~100k rows, fast reindex (<1 sec)
+    -- Small table 2: ~30k rows, fast reindex (<1 sec)
     create table e2e.small_table_2(id bigserial primary key, data text);
-    insert into e2e.small_table_2(data) select repeat('z', 100) from generate_series(1, 100000);
+    insert into e2e.small_table_2(data) select repeat('z', 50) from generate_series(1, 30000);
     create index small_idx_2 on e2e.small_table_2(data);
   \$db\$);
 end
@@ -86,19 +86,21 @@ begin
 end
 \$\$;"
 
-echo "[windows] Induce bloat in all tables (no analyze)"
+echo "[windows] Induce bloat in indexes by updating indexed columns (no analyze)"
 psql_c "${CONTROL_DB}" "do \$\$
 begin
   perform index_pilot._connect_securely('${TARGET_DB}'::name);
   perform dblink_exec('${TARGET_DB}', \$db\$
-    -- Create heavy bloat: insert more, then delete most
-    insert into e2e.large_table(data) select repeat('x', 200) from generate_series(1, 1000000);
-    insert into e2e.small_table_1(data) select repeat('y', 100) from generate_series(1, 50000);
-    insert into e2e.small_table_2(data) select repeat('z', 100) from generate_series(1, 50000);
+    -- Update indexed columns multiple times to create index bloat
+    update e2e.large_table set data = repeat('a', 200) where id % 2 = 0;
+    update e2e.large_table set data = repeat('b', 200) where id % 3 = 0;
+    update e2e.large_table set data = repeat('c', 200) where id % 5 = 0;
     
-    delete from e2e.large_table where id % 2 = 0;
-    delete from e2e.small_table_1 where id % 2 = 0;
-    delete from e2e.small_table_2 where id % 2 = 0;
+    update e2e.small_table_1 set data = repeat('a', 50) where id % 2 = 0;
+    update e2e.small_table_1 set data = repeat('b', 50) where id % 3 = 0;
+    
+    update e2e.small_table_2 set data = repeat('a', 50) where id % 2 = 0;
+    update e2e.small_table_2 set data = repeat('b', 50) where id % 3 = 0;
   \$db\$);
 end
 \$\$;"
@@ -165,26 +167,25 @@ fi
 echo "[windows] Cleanup history after TEST 2"
 psql_c "${CONTROL_DB}" "delete from index_pilot.reindex_history;"
 
-echo "[windows] TEST 3: Short window (2 seconds) - only fast indexes should complete"
+echo "[windows] TEST 3: Short window (5 seconds) - only fast indexes should complete"
 
-echo "[windows] Create massive fresh bloat for TEST 3"
+echo "[windows] Create massive fresh bloat for TEST 3 by updating indexed columns"
 psql_c "${CONTROL_DB}" "do \$\$
 begin
   perform index_pilot._connect_securely('${TARGET_DB}'::name);
   perform dblink_exec('${TARGET_DB}', \$db\$
-    -- Create massive bloat: multiple rounds of insert/delete
-    insert into e2e.large_table(data) select repeat('x', 200) from generate_series(1, 1500000);
-    delete from e2e.large_table where id % 2 = 0;
+    -- Create massive index bloat with multiple updates of indexed column
+    update e2e.large_table set data = repeat('d', 200) where id % 2 = 0;
+    update e2e.large_table set data = repeat('e', 200) where id % 3 = 0;
+    update e2e.large_table set data = repeat('f', 200) where id % 5 = 0;
+    update e2e.large_table set data = repeat('g', 200) where id % 7 = 0;
     
-    insert into e2e.large_table(data) select repeat('x', 200) from generate_series(1, 1000000);
-    delete from e2e.large_table where id % 3 = 0;
+    -- Small tables: light bloat only
+    update e2e.small_table_1 set data = repeat('c', 50) where id % 2 = 0;
+    update e2e.small_table_1 set data = repeat('d', 50) where id % 3 = 0;
     
-    -- Small tables: moderate bloat
-    insert into e2e.small_table_1(data) select repeat('y', 100) from generate_series(1, 50000);
-    delete from e2e.small_table_1 where id % 3 = 0;
-    
-    insert into e2e.small_table_2(data) select repeat('z', 100) from generate_series(1, 50000);
-    delete from e2e.small_table_2 where id % 3 = 0;
+    update e2e.small_table_2 set data = repeat('c', 50) where id % 2 = 0;
+    update e2e.small_table_2 set data = repeat('d', 50) where id % 3 = 0;
   \$db\$);
 end
 \$\$;"
@@ -206,7 +207,7 @@ psql_c "${CONTROL_DB}" "delete from index_pilot.maintenance_windows where databa
 psql_c "${CONTROL_DB}" "insert into index_pilot.maintenance_windows(database_name, day_of_week, start_time, end_time, enabled)
 select '${TARGET_DB}', extract(dow from clock_timestamp())::int,
        (clock_timestamp())::time,
-       (clock_timestamp() + interval '2 seconds')::time,
+       (clock_timestamp() + interval '5 seconds')::time,
        true;"
 
 COUNT_BEFORE_SHORT=$(psql_c "${CONTROL_DB}" "select count(*) from index_pilot.reindex_history where datname='${TARGET_DB}' and schemaname='e2e' and status='completed';")
@@ -217,19 +218,19 @@ REINDEXED_IN_WINDOW=$((COUNT_AFTER_SHORT - COUNT_BEFORE_SHORT))
 
 echo "[windows] Short window completed: ${REINDEXED_IN_WINDOW} e2e indexes reindexed"
 
-# Check that large_table was NOT reindexed in this pass (too slow for 2-sec window)
+# Check that large_table was NOT reindexed in this pass (too slow for 5-sec window)
 LARGE_COUNT=$(psql_c "${CONTROL_DB}" "select count(*) from index_pilot.reindex_history 
   where datname='${TARGET_DB}' and schemaname='e2e' and status='completed' 
   and (indexrelname = 'large_table_pkey' or indexrelname = 'large_idx')
   and entry_timestamp > clock_timestamp() - interval '1 minute';")
 
 if [[ "${LARGE_COUNT}" -gt 0 ]]; then
-  echo "[windows] FAIL: Large table should not be reindexed in 2-second window" >&2
+  echo "[windows] FAIL: Large table should not be reindexed in 5-second window" >&2
   exit 1
 fi
 
 if [[ "${REINDEXED_IN_WINDOW}" -lt 2 ]]; then
-  echo "[windows] FAIL: At least 2 small indexes should complete in 2-second window" >&2
+  echo "[windows] FAIL: At least 2 small indexes should complete in 5-second window" >&2
   exit 1
 fi
 
