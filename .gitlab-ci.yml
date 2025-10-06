@@ -356,7 +356,7 @@ quality:sql:
   allow_failure: true
 
 # End-to-end test
-e2e:
+test:e2e:
   stage: test
   image: postgres:17-alpine
   services:
