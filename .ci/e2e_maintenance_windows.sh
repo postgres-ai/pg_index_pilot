@@ -156,6 +156,27 @@ fi
 
 echo "[windows] TEST 3: Short window (3 seconds) - only fast indexes should complete"
 
+echo "[windows] Create fresh bloat for TEST 3"
+psql_c "${CONTROL_DB}" "do \$\$
+begin
+  perform index_pilot._connect_securely('${TARGET_DB}'::name);
+  perform dblink_exec('${TARGET_DB}', \$db\$
+    -- Re-insert deleted data to make indexes grow again
+    insert into e2e.large_table(data) select repeat('x', 100) from generate_series(1, 250000);
+    insert into e2e.small_table_1(data) select repeat('y', 50) from generate_series(1, 25000);
+    insert into e2e.small_table_2(data) select repeat('z', 50) from generate_series(1, 25000);
+    
+    -- Delete to create bloat again (no analyze)
+    delete from e2e.large_table where id % 3 = 0;
+    delete from e2e.small_table_1 where id % 3 = 0;
+    delete from e2e.small_table_2 where id % 3 = 0;
+  \$db\$);
+end
+\$\$;"
+
+echo "[windows] Update snapshot with new bloat"
+psql_c "${CONTROL_DB}" "call index_pilot.periodic(false);"
+
 echo "[windows] Show current index sizes and bloat ratios"
 psql_c "${CONTROL_DB}" "
 select 
