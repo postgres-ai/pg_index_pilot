@@ -233,9 +233,9 @@ Add to crontab:
 ```sql
 -- Quick bloat summary for a database
 select 
-    indexrelname as index_name,
-    pg_size_pretty(indexsize::bigint) as size,
-    round(estimated_bloat::numeric, 1) || 'x' as bloat
+  indexrelname as index_name,
+  pg_size_pretty(indexsize::bigint) as size,
+  round(estimated_bloat::numeric, 1) || 'x' as bloat
 from index_pilot.get_index_bloat_estimates('your_database')
 where estimated_bloat > 1.5
 order by estimated_bloat desc
@@ -262,9 +262,9 @@ order by ts desc;
 ```sql
 -- Total space recovered this month
 select 
-    date_trunc('month', entry_timestamp) as month,
-    count(*) as indexes_reindexed,
-    pg_size_pretty(sum(indexsize_before - indexsize_after)::bigint) as space_saved
+  date_trunc('month', entry_timestamp) as month,
+  count(*) as indexes_reindexed,
+  pg_size_pretty(sum(indexsize_before - indexsize_after)::bigint) as space_saved
 from index_pilot.reindex_history
 where status = 'completed'
 group by 1
@@ -321,18 +321,18 @@ psql -d index_pilot_control -f uninstall.sql
 
 Based on real deployments, here's what you can expect:
 
-- **60-75% reduction** in index storage usage
-- **2-3x faster** queries on previously bloated indexes
-- **Zero hours** of manual maintenance per month
-- **Zero production incidents** from automated reindexing
-- **Hundreds of GiB** recovered in large databases
+- **significant reduction** in index storage and memory usage
+- **faster** queries on previously bloated indexes
+- **0 hours** of manual maintenance per month
+- **0 production incidents** from automated reindexing
+- **improved DB health** in unexpected areas: reduced pressure to replication and backup systems (WAL savings)
 
 ## Getting help
 
-- **Installation issues:** Check [Detailed Installation Guide](docs/installation.md)
-- **Configuration:** See [Function Reference](docs/function_reference.md)
-- **Architecture details:** Read [Architecture Documentation](docs/architecture.md)
-- **Platform-specific setup:** See guides for [AWS RDS](docs/installation.md#aws-rds--aurora-specifics), [CloudSQL](docs/installation.md#google-cloud-sql), etc.
+- **Installation issues:** Check [Detailed installation guide](docs/installation.md)
+- **Configuration:** See [Function reference](docs/function_reference.md)
+- **Architecture details:** Read [Architecture documentation](docs/architecture.md)
+- open an Issue
 
 ## Contributing
 
@@ -341,6 +341,8 @@ We welcome contributions! `pg_index_pilot` is part of the PostgresAI project sui
 ## License
 
 `pg_index_pilot` is open source and available under the PostgreSQL License.
+
+The project derived from Maxim Boguk's pg_index_watch.
 
 ---
 
